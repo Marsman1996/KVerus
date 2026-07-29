@@ -1,0 +1,169 @@
+# Configurations for the KVerus
+
+# ======================== Configuration for preprocessor ========================
+
+[preprocessor]
+
+# Whether to dump the library call graph and consumer call graph, which are intermidiate results for debugging.
+dump_call_graph = false
+
+# ======================== Configuration for comprehender ========================
+
+[comprehender]
+
+# [MODIFY THIS] The llm used for RAG embedding.
+embedding_llm = "embedding_llm"
+
+# The llm used for the comprehension.
+comprehension_llm = ""
+
+# The number of document chunks to be retrieved in each RAG query.
+retrieve_top_k = 10
+
+# The number of functions to be processed in each batch when comprehending function relevance.
+function_batch_size = 24
+
+# ======================== Configuration for FVT prover ========================
+[prover]
+
+# The llm used for the FVT proof.
+prove_llm = ""
+
+# ======================== Configuration for FVT refiner ========================
+
+[refiner]
+
+# The llm used for the FVT fix.
+refine_llm = ""
+
+# The maximum number of sanitization rounds for each formal verification target.
+refinement_rounds = 10
+
+# Whether to validate the generated code.
+validate_code = false
+
+# Whether to generate failure analysis report
+enable_report = false
+
+# ======================== Configuration for Evaluators ========================
+
+[eval]
+
+# The llm used for proof difficulty evaluation.
+difficulty_llm = ""
+
+# Optional few-shot examples injected into the proof difficulty prompt.
+# Leave empty to rely on the default rubric. Use TOML multi-line strings if needed.
+difficulty_examples = ""
+
+# ======================== Configuration for Large Language Models ========================
+
+[llm]
+
+# [MODIFY THIS] The default llm used for the generation, comprehension, and analysis.
+# If the llm is not specified in the corresponding section, the default llm will be used.
+default_llm = "cloud_llm"
+
+# Validate the llm or not. 
+# If set to true, KVerus will validate the llm availability through a "ping" query.
+# For Ollama model, this validation can help the Ollama server to load the model in advance.
+validate_llm = true
+
+# Whether to log each query, including the content and the token usage.
+# The log will be saved in the "log/llm.log" file and printed in the debug mode.
+enable_log = true
+
+# ------------- Configuration for LLM 1 (Cloud LLM) -------------
+
+# [MODIFY THIS] Your custom llm name.
+[llm.cloud_llm]
+
+# The llm type, currently support "ollama", "openai", "ollama-reasoning", "openai-reasoning"
+llm_type = "openai"
+
+# The base url for the openai api.
+base_url = "https://api.openai.com/v1/"
+
+# The api key for the openai api, default using the environment variable "OPENAI_API_KEY".
+api_key = ""
+
+# The model used for the llm query.
+model = "gpt-4o"
+
+# The temperature for the llm query. Recommend to set it lower for generating code.
+temperature = 0.5
+
+# The token limit for each llm query. Set it to -1 for the preset limit from model provider.
+max_tokens = -1
+
+# The timeout seconds for each query.
+timeout = 80
+
+# The maximum retry times for each query.
+retry_times = 3
+
+# Whether to enable streaming responses from the LLM API.
+is_stream = false
+
+# ------------- Configuration for LLM 2 (Local LLM) -------------
+
+# [MODIFY THIS] Your custom llm name.
+[llm.local_llm]
+
+# The llm type, currently support "ollama", "openai", "ollama-reasoning", "openai-reasoning"
+llm_type = "ollama-reasoning"
+
+# The ollama server host.
+host = "localhost"
+
+# The ollama server port.
+port = 11434
+
+# The model used for the llm query.
+model = "deepseek-r1:70b"
+
+# The max tokens for the ollama api, be careful about the GPU memory usage.
+# Refer to https://qwen.readthedocs.io/en/latest/benchmark/speed_benchmark.html for more information.
+max_tokens = 6144
+
+# The timeout seconds for each query.
+timeout = 600
+
+# The maximum retry times for each query.
+retry_times = 3
+
+# ------------- Configuration for LLM 3 (Embedding LLM) -------------
+
+# [MODIFY THIS] Your custom llm name.
+[llm.embedding_llm]
+
+# The llm type, currently support "ollama", "openai", "ollama-reasoning", "openai-reasoning"
+llm_type = "ollama"
+
+# The ollama server host.
+host = "localhost"
+
+# The ollama server port.
+port = 11434
+
+# The model used for the llm query.
+model = "nomic-embed-text"
+
+# The max tokens for the ollama api, set to -1 for the preset limit of Ollama.
+max_tokens = -1
+
+# The timeout seconds for each query.
+timeout = 30
+
+# The maximum retry times for each query.
+retry_times = 3
+
+# ======================== Configuration for binary path ========================
+
+[paths]
+
+# The path of the verus project
+verus_dir = "{KVERUS_PATH}/database/CortenMM/code/tools/verus"
+
+# The path of the verus processor binary
+verus_processor = "{KVERUS_PATH}/build/bin/PromeX-Verus"

@@ -1,0 +1,60 @@
+# Configuration file for libraries.
+
+
+# ======================== Configuration for fvt 1 ========================
+
+# [MODIFY THIS] The name of the formal verify target.
+[a_verus_fvt]
+
+# [MODIFY THIS] The language of the FVT. The possible value is "rust" only now.
+language = "rust"
+
+# [MODIFY THIS] The verify tool for the FVT. The possible values is "verus" only now.
+fvt_tool = "verus"
+
+# [MODIFY THIS] The path of crate to be verified.
+# You can use {VERUS_DIR} placeholder which will be replaced with the verus_dir from config.toml
+crate_path = "path/to/crate"
+
+# [MODIFY THIS] The paths of pre-write model for verifying.
+model_paths = []
+
+# [MODIFY THIS] The path of extracted model knowledge for RAG.
+database_path = ""
+
+# [MODIFY THIS] The command to run verify.
+verify_cmd = ""
+
+# [MODIFY THIS] The content passed to LLM, could be "file" or "function"
+level = "function"
+
+# [MODIFY THIS] The path of the documentation file of the library. It can be:
+# 1. A documentation file like README.md.
+# 2. A directory containing documentation files. KVerus will read all files with .md/.txt/.html/.htm/.pdf/.adoc/.rst extension or named "README"/"USAGE".
+# 3. A website URL. KVerus will download the website and extract the text content.
+document_paths = ["path/to/README.md", "path/to/docs", "https://example.com"]
+
+# [MODIFY THIS] Whether the document has API usage. If true, KVerus will try to comprehend the API usage from the document.
+document_has_api_usage = false
+
+# [MODIFY THIS] The output path for KVerus to store the results.
+output_path = "path/to/output"
+
+# The consumer case source paths of the library, e.g., the test cases or examples using the library.
+# These cases will be used to infer the API relationships.
+consumer_case_paths = []
+
+# The build arguments while building the consumer cases. Normally the needed headers will be included and this option is not necessary.
+consumer_build_args = []
+
+# The extra source paths of library. A source path can be a directory or a file.
+# KVerus will analyze the source code in the compilation database specified by compile_commands_path.
+# If you want to include extra source files, you can specify them here.
+source_paths = []
+
+# The paths you want to exclude from the library. This works for source paths, header paths and document paths.
+exclude_paths = []
+
+# The json file path storing extra API usage hints, which will be directly provided to the LLM during generation.
+# The format of the json file should be: {"function_name": "function_usage", ...}
+api_hints_path = ""

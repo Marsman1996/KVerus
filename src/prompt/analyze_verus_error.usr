@@ -1,0 +1,4 @@
+Please analyze the following Verus verification output and extract all the information I need to fix the errors and warnings. Especially focus on postcondition failures, spec function issues, and unmet recommendations. For each issue, provide a file+line reference, explain the problem, and suggest what information I need to fix.
+
+### Verus Error Report
+{ERROR_MESSAGE}

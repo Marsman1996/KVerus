@@ -1,0 +1,7 @@
+# vstd is the Verus standard library, which can only be comprehended but not modified or verified by user.
+[vstd]
+language = "rust"
+fvt_tool = "verus"
+# NOTE: Pre-built Verus cannot be analyzed for now
+crate_path = "{VERUS_DIR}/source/vstd"
+output_path = "database/vstd/out"

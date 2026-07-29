@@ -1,0 +1,15 @@
+Task: Prove the following Verus code so that it passes verification.
+Reply with only the content of the Verus code enclosed in triple backticks (```), without any additional explanation.
+
+## Unproven Verus Code
+```rust
+{VERUS_CODE}
+```
+
+## Verus Error Message
+```
+{ERROR_MESSAGE}
+```
+
+## Supply Knowledge
+{KNOWLEDGE}

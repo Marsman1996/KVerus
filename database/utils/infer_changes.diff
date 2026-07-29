@@ -1,0 +1,20 @@
+diff --git a/code/infer.py b/code/infer.py
+index 00f8f07c..f257e718 100644
+--- a/code/infer.py
++++ b/code/infer.py
+@@ -121,6 +121,7 @@ class LLM:
+                     stop=None,
+                     response_format={"type": "json_object" if json else "text"},
+                 )
++                print(answers)
+                 break
+             except openai.NotFoundError as e:
+                 self._add_client_id()
+@@ -191,6 +192,7 @@ class LLM:
+                     stop=None,
+                     response_format={"type": "json_object" if json else "text"},
+                 )
++                print(answers)
+                 break
+             except openai.NotFoundError:
+                 self._add_client_id()

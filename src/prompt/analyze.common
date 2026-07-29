@@ -1,0 +1,16 @@
+The knowledge could be but not limited to:
+1. extra lemma with natural language description
+2. definition of function/type
+
+Please **ONLY** list each unprovided knowledge in a json, such as:
+```json
+[
+    {{"lemma": "Proof that division of a positive integer by a positive integer less than or equal to it is nonzero. Specifically, given that `x >= d`, we can conclude that `x / d > 0`."}},
+    {{"definition": "The definition to ..."}}
+]
+```
+
+### Unproven Verus Code
+```Rust
+{VERUS_CODE}
+```

@@ -1,0 +1,20 @@
+As a Verus verification expert, after {MAX_REFINE_ROUNDS} rounds of generation, you still fail the verification.
+Please analyze the failure reason and explain it.
+
+## Original Code
+```rust
+{ORI_CODE}
+```
+
+## Generated Code
+```rust
+{GEN_CODE}
+```
+
+## Verus Error Message
+```
+{ERROR_MESSAGE}
+```
+
+## Supply Knowledge
+{KNOWLEDGE}

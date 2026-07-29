@@ -1,0 +1,9 @@
+[mathspec]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/mathspec/code/benchmark"
+output_path = "database/mathspec/out"
+
+database_path = ""
+verify_base_path = "database/mathspec/code"
+verify_cmd = "cargo xtask verify -- --error-format=json"

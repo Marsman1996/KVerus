@@ -1,0 +1,10 @@
+[HumanEval]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/HumanEval/code/unverified"
+
+database_path = "{KVERUS_PATH}/database/vstd/out/"
+output_path = "database/HumanEval/out/"
+verify_base_path = "./"
+verify_cmd = "{VERUS_BIN} {INPUT_PATH} --error-format=json"
+level = "file"

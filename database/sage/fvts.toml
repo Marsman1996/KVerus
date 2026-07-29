@@ -1,0 +1,11 @@
+# Memory Allocator Dataset
+[MA]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/sage/code/benchmarks/VeruSAGE-Bench/source-projects/memory-allocator/unverified"
+
+database_path = "{KVERUS_PATH}/database/vstd/out/"
+output_path = "database/sage/out/ma"
+verify_base_path = "./"
+verify_cmd = "{VERUS_BIN} {INPUT_PATH} --error-format=json"
+level = "file"

@@ -1,0 +1,8 @@
+As a Verus verification expert, your task is to provide what knowledge needed to extra provide to finish the prove process in the given Verus code.
+
+{COMMON_CODE}
+
+### Verus Error Message
+```
+{ERROR_MESSAGE}
+```

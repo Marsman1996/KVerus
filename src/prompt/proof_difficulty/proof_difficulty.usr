@@ -1,0 +1,29 @@
+{{FEW_SHOT_EXAMPLES}}
+
+You will now evaluate a Verus proof implementation using the rubric above.
+
+### Target Function
+- **FVT**: {{FVT_NAME}}
+- **Function**: {{FUNCTION_NAME}}
+- **Signature**: {{FUNCTION_SIGNATURE}}
+- **Source File**: {{FILE_PATH}}
+- **Impl Span**: {{IMPL_SPAN}}
+
+### Static Indicators
+{{FUNCTION_METADATA}}
+
+### Proof Implementation
+```rust
+{{FUNCTION_CODE}}
+```
+
+### Required Output
+Respond with a single JSON object using this schema:
+```json
+{
+  "score": <integer between 1 and 15>,
+  "rationale": "<2-3 sentences referencing the code traits that drive the score>",
+  "risk_factors": ["<optional short bullet items>"]
+}
+```
+The `score` value MUST be an integer in the inclusive range [1, 15]. If you are uncertain, pick the most conservative higher score and mention the ambiguity inside `rationale`.

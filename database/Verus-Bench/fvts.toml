@@ -1,0 +1,24 @@
+# A simple file
+[single]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/Verus-Bench/code/unverified"
+
+database_path = "{KVERUS_PATH}/database/vstd/out/"
+output_path = "database/Verus-Bench/out/single"
+verify_base_path = "./"
+verify_cmd = "{VERUS_BIN} {INPUT_PATH} --error-format=json"
+level = "file"
+
+
+# A bunch of files
+[Verus-Bench]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/Verus-Bench/code/unverified"
+
+database_path = "{KVERUS_PATH}/database/vstd/out/"
+output_path = "database/Verus-Bench/out/"
+verify_base_path = "./"
+verify_cmd = "{VERUS_BIN} {INPUT_PATH} --error-format=json"
+level = "file"

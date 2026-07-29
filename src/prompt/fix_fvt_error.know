@@ -1,0 +1,449 @@
+
+### Tokenized State Machine
+
+------
+
+#### **Overview**
+
+The `tokenized_state_machine!` macro models concurrent systems via state machines with tokenization.
+
+- **Sharding Strategies**: Define how state fields are split into tokens for verification.
+- **Generated Tokens**: Each field in the `fields` block produces a token type (e.g., `M::f`) based on its strategy.
+
+------
+
+#### **Fields Block Structure**
+
+Declare state fields with `#[sharding(...)]` to specify tokenization:
+
+```
+tokenized_state_machine!{    
+  X {        
+    fields {            
+      #[sharding(variable)] // Strategy = variable → generates `X::counter` token            
+      pub counter: int,        
+    }        
+    ...  
+  }
+}
+```
+
+------
+
+#### **Sharding Strategies & Traits**
+
+| Strategy   | Token Trait                 | Collection Helper Struct | Notes                                                        |
+| :--------- | :-------------------------- | :----------------------- | :----------------------------------------------------------- |
+| `variable` | `UniqueValueToken<V>`       | —                        | The value of the token is the same as the value of the field. Having multiple such tokens at the same time (for the same field) is an impossible state. |
+| `constant` | *(No token)*                | —                        | —                                                            |
+| `option`   | `UniqueValueToken<V>`       | —                        | When `field` is `None`, this corresponds to no token existing, while when `field` is `Some(v)`, this corresponds to a token of value `v` existing. Having multiple such tokens at the same time is an impossible state. |
+| `map`      | `UniqueKeyValueToken<K, V>` | `MapToken<K, V, M::f>`   | Every token represents a *single* key-value pair (given by the `.key()` and `.value()` functions on the `UniqueKeyValueToken`trait). The value of the field on the global state is the map given by the collection of key-value pairs. |
+| `set`      | `UniqueElementToken<V>`     | `SetToken<V, M::f>`      | Every token represents a *single* element of the set (given by the `.element()` function on the `UniqueElementToken`. The value of the field on the global state is the set given by the collection of all such elements. |
+| `multiset` | `UniqueElementToken<V>`     | `MultisetToken<V, M::f>` | Every token represents a *single* element of the multiset (given by the `.element()` function on the `UniqueElementToken` trait). The value of the field on the global state is the multiset given by the collection of all such elements. |
+| `bool`     | `UniqueSimpleToken`         | —                        | When `field` is `false`, this corresponds to no token existing, while when `field` is `true`, this corresponds to a token existing. The token doesn’t contain any additional data. Having multiple such tokens at the same time is an impossible state. |
+| `count`    | `CountToken`                | —                        | The global value of the `field` is the sum of the counts of all the tokens. |
+
+------
+
+#### **Token Traits**
+
+##### **Core Traits**
+
+1. **`ElementToken<Element>`**
+
+   ```
+   pub trait ElementToken<Element>: Sized {
+       // Required methods
+       spec fn instance_id(&self) -> InstanceId;
+       spec fn element(&self) -> Element;
+       proof fn arbitrary() -> tracked s : Self;
+   }
+   ```
+
+2. **`ValueToken<Value>`**
+
+   ```
+   pub trait ValueToken<Value>: Sized {
+       // Required methods
+       spec fn instance_id(&self) -> InstanceId;
+       spec fn value(&self) -> Value;
+       proof fn agree(tracked &self, tracked other: &Self)
+       	requires
+   			self.instance_id() == other.instance_id(),
+   		ensures
+   			self.value() == other.value(),
+       proof fn arbitrary() -> tracked s : Self;
+   }
+   ```
+
+3. **`KeyValueToken<Key, Value>`**
+
+   ```
+   pub trait KeyValueToken<Key, Value>: Sized {
+       // Required methods
+       spec fn instance_id(&self) -> InstanceId;
+       spec fn key(&self) -> Key;
+       spec fn value(&self) -> Value;
+       proof fn agree(tracked &self, tracked other: &Self)
+           requires
+               self.instance_id() == other.instance_id(),
+               self.key() == other.key(),
+           ensures
+               self.value() == other.value(),
+       proof fn arbitrary() -> tracked s : Self;
+   }
+   ```
+
+4. **`SimpleToken`**
+
+   ```
+   pub trait SimpleToken: Sized {
+       // Required methods
+       spec fn instance_id(&self) -> InstanceId;
+       proof fn arbitrary() -> tracked s : Self;
+   }
+   ```
+
+5. **`CountToken`**
+
+   ```
+   pub trait CountToken: Sized {
+       // Required methods
+       spec fn instance_id(&self) -> InstanceId;
+       spec fn count(&self) -> nat;
+       proof fn join(tracked &mut self, tracked other: Self)
+       	requires
+   			old(self).instance_id() == other.instance_id(),
+   		ensures
+   			self.instance_id() == old(self).instance_id(),
+   			self.count() == old(self).count() + other.count(),
+       proof fn split(tracked &mut self, count: nat) -> tracked token : Self
+       	requires
+               count <= old(self).count(),
+           ensures
+               self.instance_id() == old(self).instance_id(),
+               self.count() == old(self).count() - count,
+               token.instance_id() == old(self).instance_id(),
+               token.count() == count,
+       proof fn weaken_shared(tracked &self, count: nat) -> tracked s : &Self
+       	requires
+               count <= self.count(),
+           ensures
+               s.instance_id() == self.instance_id(),
+               s.count() == count,
+       proof fn arbitrary() -> tracked s : Self;
+   }
+   ```
+
+##### **Uniqueness Traits**
+
+1. **`UniqueValueToken<V>`**
+
+   ```
+   pub trait UniqueValueToken<Value>: ValueToken<Value> {
+       // Required method
+       proof fn unique(tracked &mut self, tracked other: &Self)
+       	ensures
+               self.instance_id() != other.instance_id(),
+               *self == *old(self),
+   }
+   ```
+
+2. **`UniqueKeyValueToken<K, V>`**
+
+   ```
+   pub trait UniqueKeyValueToken<Key, Value>: KeyValueToken<Key, Value> {
+       // Required method
+       proof fn unique(tracked &mut self, tracked other: &Self)
+       	ensures
+               self.instance_id() != other.instance_id() || self.key() != other.key(),
+               *self == *old(self),
+   }
+   ```
+
+3. **`UniqueElementToken<V>`**
+
+   ```
+   pub trait UniqueElementToken<Element>: ElementToken<Element> {
+       // Required method
+       proof fn unique(tracked &mut self, tracked other: &Self)
+           ensures
+               self.instance_id() == other.instance_id() ==> self.element() != other.element(),
+               *self == *old(self),
+   }
+   ```
+
+4. **`UniqueSimpleToken`**
+
+   ```
+   pub trait UniqueSimpleToken: SimpleToken {
+       // Required method
+       proof fn unique(tracked &mut self, tracked other: &Self)
+           ensures
+               self.instance_id() != other.instance_id(),
+               *self == *old(self),
+   }
+   ```
+
+------
+
+#### **Collection Structs**
+
+1. **`MapToken<K, V, Token>`**
+
+   ```
+   pub struct MapToken<Key, Value, Token>where
+       Token: KeyValueToken<Key, Value>,{ /* private fields */ }
+   ```
+
+   **Implementations**
+
+   ```
+   pub closed spec fn instance_id(self) -> InstanceId
+   pub closed spec fn map(self) -> Map<Key, Value>
+   pub open spec fn dom(self) -> Set<Key>
+   	{ self.map().dom() }
+   pub open spec fn spec_index(self, k: Key) -> Value
+   	{ self.map()[k] }
+   pub open spec fn index(self, k: Key) -> Value
+   	{ self.map()[k] }
+   pub proof fn empty(instance_id: InstanceId) -> tracked s : Self
+       ensures
+           s.instance_id() == instance_id,
+           s.map() === Map::empty(),
+   pub proof fn insert(tracked &mut self, tracked token: Token)
+   	requires
+           old(self).instance_id() == token.instance_id(),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.map() == old(self).map().insert(token.key(), token.value()),
+   pub proof fn remove(tracked &mut self, key: Key) -> tracked token : Token
+       requires
+           old(self).map().dom().contains(key),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.map() == old(self).map().remove(key),
+           token.instance_id() == self.instance_id(),
+           token.key() == key,
+           token.value() == old(self).map()[key],
+   pub proof fn into_map(tracked self) -> tracked map : Map<Key, Token>
+       ensures
+           map.dom() == self.map().dom(),
+           forall |key| {
+               map.dom().contains(key)
+                   ==> map[key].instance_id() == self.instance_id() && map[key].key() == key
+                       && map[key].value() == self.map()[key]
+           },
+   pub proof fn from_map(instance_id: InstanceId, tracked map: Map<Key, Token>) -> tracked s : Self
+       requires
+           forall |key| #[trigger] map.dom().contains(key) ==> map[key].instance_id() == instance_id,
+           forall |key| #[trigger] map.dom().contains(key) ==> map[key].key() == key,
+       ensures
+           s.instance_id() == instance_id,
+           s.map().dom() == map.dom(),
+           forall |key| #[trigger] map.dom().contains(key) ==> s.map()[key] == map[key].value(),
+   ```
+
+   
+
+2. **`SetToken<V, Token>`**
+
+   ```
+   pub struct SetToken<Element, Token>where
+       Token: ElementToken<Element>,{ /* private fields */ }
+   ```
+
+   **Implementations**
+
+   ```
+   pub closed spec fn instance_id(self) -> InstanceId
+   pub closed spec fn set(self) -> Set<Element>
+   pub open spec fn contains(self, element: Element) -> bool
+   	{ self.set().contains(element) }
+   pub proof fn empty(instance_id: InstanceId) -> tracked s : Self
+       ensures
+           s.instance_id() == instance_id,
+           s.set() === Set::empty(),
+   pub proof fn insert(tracked &mut self, tracked token: Token)
+       requires
+           old(self).instance_id() == token.instance_id(),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.set() == old(self).set().insert(token.element()),
+   pub proof fn remove(tracked &mut self, element: Element) -> tracked token : Token
+       requires
+           old(self).set().contains(element),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.set() == old(self).set().remove(element),
+           token.instance_id() == self.instance_id(),
+           token.element() == element,
+   pub proof fn into_map(tracked self) -> tracked map : Map<Element, Token>
+       ensures
+           map.dom() == self.set(),
+           forall |key| {
+               map.dom().contains(key)
+                   ==> map[key].instance_id() == self.instance_id() && map[key].element() == key
+           },
+   pub proof fn from_map(instance_id: InstanceId, tracked map: Map<Element, Token>) -> tracked s : Self
+       requires
+           forall |key| #[trigger] map.dom().contains(key) ==> map[key].instance_id() == instance_id,
+           forall |key| #[trigger] map.dom().contains(key) ==> map[key].element() == key,
+       ensures
+           s.instance_id() == instance_id,
+           s.set() == map.dom(),
+   ```
+
+   
+
+3. **`MultisetToken<V, Token>`**
+
+   ```
+   pub struct MultisetToken<Element, Token>where
+       Token: ElementToken<Element>,{ /* private fields */ }
+   ```
+
+   **Implementations**
+
+   ```
+   pub closed spec fn instance_id(self) -> InstanceId
+   pub closed spec fn multiset(self) -> Multiset<Element>
+   pub proof fn empty(instance_id: InstanceId) -> tracked s : Self
+       ensures
+           s.instance_id() == instance_id,
+           s.multiset() === Multiset::empty(),
+   pub proof fn insert(tracked &mut self, tracked token: Token)
+       requires
+           old(self).instance_id() == token.instance_id(),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.multiset() == old(self).multiset().insert(token.element()),
+   pub proof fn remove(tracked &mut self, element: Element) -> tracked token : Token
+       requires
+           old(self).multiset().contains(element),
+       ensures
+           self.instance_id() == old(self).instance_id(),
+           self.multiset() == old(self).multiset().remove(element),
+           token.instance_id() == self.instance_id(),
+           token.element() == element,
+   ```
+
+​### PCell
+
+------
+
+#### **Overview**
+
+The `PCell<T>` type (“permissioned call”) is the primitive Verus `Cell` type. It allows storing and modifying values while maintaining verification guarantees through a ghost permission token type `cell::PointsTo<V>`. The value is tracked by `cell::PointsTo<V>` with its `mem_contents()`. 
+
+------
+
+#### MemContents Implementations
+
+```
+// Represents (typed) contents of memory.
+pub enum MemContents<T> {
+    Uninit,
+    Init(T),
+}
+
+pub open spec fn is_init(&self) -> bool
+	{ self is Init }
+
+pub open spec fn is_uninit(&self) -> bool
+	{ self is Uninit }
+pub open spec fn value(&self) -> T
+	{ self->0 }
+```
+
+#### PCell Implementations
+
+```
+// A unique ID for the cell.
+pub uninterp fn id(&self) -> CellId
+//Return an empty (“uninitialized”) cell.
+pub const exec fn empty() -> pt : (PCell<V>, Tracked<PointsTo<V>>)
+	ensures
+		pt.1@@ === pcell_points![pt.0.id() => MemContents::Uninit],
+pub const exec fn new(v: V) -> pt : (PCell<V>, Tracked<PointsTo<V>>)
+	ensures
+		pt.1@@ === pcell_points![pt.0.id() => MemContents::Init(v)],
+		//This is equivalent to
+		pt.1@.id()==pt.0.id() && pt.1@.is_init() && pt.1@.value()==v
+pub exec fn put(&self, Tracked(perm): Tracked<&mut PointsTo<V>>, v: V)
+	requires
+        old(perm)@ === pcell_points![self.id() => MemContents::Uninit],
+        //This is equivalent to
+		old(perm)@.id()==self.id() && old(perm)@.is_uninit()
+	ensures
+		perm@ === pcell_points![self.id() => MemContents::Init(v)],
+pub exec fn take(&self, Tracked(perm): Tracked<&mut PointsTo<V>>) -> v : V
+    requires
+        self.id() === old(perm)@.pcell,
+        old(perm).is_init(),
+    ensures
+        perm.id() === old(perm)@.pcell,
+        perm.mem_contents() === MemContents::Uninit,
+        v === old(perm).value(),
+pub exec fn replace(&self, Tracked(perm): Tracked<&mut PointsTo<V>>, in_v: V) -> out_v : V
+    requires
+        self.id() === old(perm)@.pcell,
+        old(perm).is_init(),
+    ensures
+        perm.id() === old(perm)@.pcell,
+        perm.mem_contents() === MemContents::Init(in_v),
+        out_v === old(perm).value(),
+pub exec fn borrow<'a>(&'a self, Tracked(perm): Tracked<&'a PointsTo<V>>) -> v : &'a V
+    requires
+        self.id() === perm@.pcell,
+        perm.is_init(),
+    ensures
+        *v === perm.value(),
+pub exec fn into_inner(self, Tracked(perm): Tracked<PointsTo<V>>) -> v : V
+    requires
+        self.id() === perm@.pcell,
+        perm.is_init(),
+    ensures
+        v === perm.value(),
+//If V: Copy
+pub exec fn write(&self, Tracked(perm): Tracked<&mut PointsTo<V>>, in_v: V)
+    requires
+        self.id() === old(perm)@.pcell,
+        old(perm).is_init(),
+    ensures
+        perm.id() === old(perm)@.pcell,
+        perm.mem_contents() === MemContents::Init(in_v),
+```
+
+------
+
+#### cell::PointsTo Implementations
+
+```
+//Permission object associated with a PCell<V>.
+pub struct PointsTo<V> { /* private fields */ }
+
+//The CellId of the PCell this permission is associated with.
+pub uninterp fn id(&self) -> CellId
+//The contents of the cell, either unitialized or initialized to some V.
+pub uninterp fn mem_contents(&self) -> MemContents<V>
+pub open spec fn view(self) -> PointsToData<V>
+{
+    PointsToData {
+        pcell: self.id(),
+        value: option_from_mem_contents(self.mem_contents()),
+    }
+}
+pub open spec fn is_init(&self) -> bool
+	{ self.mem_contents().is_init() }
+pub open spec fn is_uninit(&self) -> bool
+	{ self.mem_contents().is_uninit() }
+pub open spec fn value(&self) -> V
+	recommends
+        self.is_init(),
+        { self.mem_contents().value() }
+```
+
+#### pcell_points
+
+For a `cell::Pointsto<V>` perm, you may see propositions like `perm@==pcell_points![id => MemContents::Init(v)]`. This macro use @ to view `perm` as a `cell::PointsToData`, it is equivalent to `perm.id() == id && perm.is_init() && perm.value()==v`. Similarly, `perm@==pcell_points![id => MemContents::Uninit]` is equivalent to `perm.id() == id && perm.is_uninit()`.

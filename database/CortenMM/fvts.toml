@@ -1,0 +1,10 @@
+[lock-protocol]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/cortenmm/code/lock-protocol-rcu"
+output_path = "database/cortenmm/out/lock-protocol"
+document_paths = ["database/cortenmm/code/README.md"]
+
+database_path = "{KVERUS_PATH}/database/vstd/out/comprehender/documents"
+verify_base_path = "database/cortenmm/code"
+verify_cmd = "cargo xtask verify --targets lock-protocol-rcu -- --error-format=json"

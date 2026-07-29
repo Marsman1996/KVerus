@@ -1,0 +1,19 @@
+As a Verus verification expert, your task is to ensure the newly generated code does not modify the execution code.
+
+Please **ONLY** output the result in a json, such as:
+```json
+{{
+    "modified": True, 
+    "analysis": "The execution code is modified, the modified code is "
+}}
+```
+
+## Original Code
+```rust
+{ORI_CODE}
+```
+
+## Generated Code
+```rust
+{GEN_CODE}
+```

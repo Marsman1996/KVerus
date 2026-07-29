@@ -1,0 +1,10 @@
+[MBPP]
+language = "rust"
+fvt_tool = "verus"
+crate_path = "database/MBPP/code/unverified"
+
+database_path = "{KVERUS_PATH}/database/vstd/out/"
+output_path = "database/MBPP/out/"
+verify_base_path = "./"
+verify_cmd = "{VERUS_BIN} {INPUT_PATH} --error-format=json"
+level = "file"

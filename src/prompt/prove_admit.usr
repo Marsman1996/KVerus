@@ -1,0 +1,13 @@
+As a Verus verification expert, your task is to eliminate the first of the admit() in the following Verus code. 
+If the proof can be complete by SMT solver, just delete the `admit()`. 
+Else replace each admit() with a valid proof or logic that ensures the code passes verification. 
+Maintain correctness, adhere to Verus syntax, and include necessary ensures, requires, or invariant clauses where appropriate.
+Output **ONLY** the modified source code, with no explanation.
+
+## Unproven Verus Code
+```rust
+{VERUS_CODE}
+```
+
+## Supply Knowledge
+{KNOWLEDGE}
