@@ -71,7 +71,7 @@ fn write_bytes(path: &str, data: &[u8]) -> std::io::Result<()> {
 }
 ```
 
-If verified callers need a contract for such an adapter, design and review that trusted contract under `proof-engineering-and-trust-boundaries.md`; do not infer filesystem semantics from this sketch.
+If verified callers need a contract for such an adapter, design and review that trusted contract under `../proof-engineering-and-trust-boundaries.md`; do not infer filesystem semantics from this sketch.
 
 ## Edge cases
 

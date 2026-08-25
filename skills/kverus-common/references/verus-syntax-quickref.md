@@ -96,7 +96,7 @@ assert(seq@.len() == n);
 assert(tracked_value@ == expected);
 ```
 
-For `Tracked<T>` or `Ghost<T>`, the guide shows pattern matching to unwrap values at function boundaries; see `references/ghost-tracked.md`.
+For `Tracked<T>` or `Ghost<T>`, the guide shows pattern matching to unwrap values at function boundaries; see `ghost-tracked.md`.
 
 ## Minimal Migration Reminders
 
