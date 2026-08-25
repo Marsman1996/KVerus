@@ -2,7 +2,7 @@
 
 **Status:** Not supported
 **Category:** Items
-**Guide ref:** [features.md — Items](source/docs/guide/src/features.md)
+**Guide ref:** `source/docs/guide/src/features.md` — Items
 
 ## What's unsupported
 

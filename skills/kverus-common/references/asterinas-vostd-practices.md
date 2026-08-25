@@ -49,7 +49,7 @@ item and its smallest verifier-demonstrated dependency closure.
 - For targets under `ostd/src/`, inspect the corresponding `ostd/specs/**`
   subsystem model when it defines the same concepts.
 - Inspect `crate::specs::arch::*`, `crate::specs::task::*`,
-  `verified_libs/vstd_extra`, `verified_libs/verified_bitflags`,
+  `verified_libs/vstd_extra`, `verified_libs/bitflags`,
   `verified_libs/ostd-pod`, and `ostd/libs/align_ext` only when imported or
   implicated by a verification failure.
 - Use `tools/verus/source/vstd` as the standard-library proof fallback when local

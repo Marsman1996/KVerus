@@ -2,7 +2,7 @@
 
 **Status:** Not supported
 **Category:** Types
-**Guide ref:** [features.md — Types and standard library functionality](source/docs/guide/src/features.md)
+**Guide ref:** `source/docs/guide/src/features.md` — Types and standard library functionality
 
 ## What's unsupported
 

@@ -2,7 +2,7 @@
 
 **Status:** Not supported
 **Category:** Multi-threading
-**Guide ref:** [features.md — Multi-threading](source/docs/guide/src/features.md)
+**Guide ref:** `source/docs/guide/src/features.md` — Multi-threading
 
 ## What's unsupported
 
@@ -78,5 +78,5 @@ See: [vstd atomic_ghost documentation](https://verus-lang.github.io/verus/verusd
 ## Related
 
 - [drop.md](drop.md) — `MutexGuard` relies on `Drop` for unlock
-- Verus guide: [concurrency](source/docs/guide/src/concurrency.md)
-- Verus guide: [interior mutability](source/docs/guide/src/interior_mutability.md)
+- Verus guide: `source/docs/guide/src/concurrency.md`
+- Verus guide: `source/docs/guide/src/interior_mutability.md`
