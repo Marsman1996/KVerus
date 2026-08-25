@@ -82,7 +82,7 @@ case from VOSTD PR #704 illustrates a mutable cursor model, borrowed-key orderin
 requirements, `old`/`final` mutation relations, and grouped reusable facts; it
 is a design example, not a template to copy for unrelated APIs.
 
-## Placement and Review Gate
+## Placement and Review
 
 Use the repository's dedicated external-spec library and module exports. In
 Asterinas/VOSTD, place the contract in
@@ -90,13 +90,12 @@ Asterinas/VOSTD, place the contract in
 `verified_libs/vstd_extra/src/external/mod.rs`, and keep callers on the original
 qualified standard-library API.
 
-Before editing, present the proposed API, location, source basis, contract,
-models, panic behavior, and TCB impact to the user. Add or change the trusted
-contract only after explicit approval from the active task workflow.
+Before editing, establish the proposed API, location, source basis, contract,
+models, panic behavior, and TCB impact.
 
 ## Validate and Report
 
-After approval:
+After adding or changing the contract:
 
 1. Verify the external-spec library or its narrowest documented target.
 2. Verify the original failing module and check every affected call site.

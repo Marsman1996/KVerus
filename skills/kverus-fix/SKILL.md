@@ -89,27 +89,14 @@ Use this branch only when fresh verification output implicates a `std`, `core`, 
 3. Follow `std-external-specifications.md` to inspect the standard-library implementation and its source comments or API documentation for the exact Rust toolchain in use. Trace delegated helpers when the public method body alone does not establish its behavior.
 4. Draft the smallest sound specification that preserves every relevant runtime effect while exposing only semantics justified by those sources. Keep reusable external contracts in the repository's dedicated external-spec library, not beside the failing caller.
 
-### External-Spec Confirmation Gate
-
-Before adding or changing an `assume_specification`, present the following to the user:
-
-- the exact qualified standard-library API and active Rust/Verus version
-- the proposed external-spec file and any module exports or model types to add
-- the standard-library source path plus the comments or documentation used as evidence
-- the proposed `requires`, `ensures`, mutation model, and panic/unwind behavior
-- why existing vstd or project specifications are insufficient
-- the resulting trusted-computing-base boundary
-
-Ask the user to approve the proposed contract, then stop and wait. Do not add the contract or edit callers before explicit approval. If the user changes the contract or source basis, refresh the affected analysis and request confirmation again.
-
-After approval, add the external specification and any minimal model, external type specification, proved bridge lemma, or broadcast group it requires. Re-run focused verification for the spec library and target, then run the resolved full verification command. Treat successful verification as evidence that the contract integrates with the proof, not that Rust's implementation has been verified.
+Add the external specification and any minimal model, external type specification, proved bridge lemma, or broadcast group it requires. Re-run focused verification for the spec library and target, then run the resolved full verification command. Treat successful verification as evidence that the contract integrates with the proof, not that Rust's implementation has been verified.
 
 ## Hard Constraints
 
 1. Do not modify existing `requires`.
 2. Do not modify existing `ensures`.
 3. Do not add new `assume(...)` statements.
-4. Add or change `assume_specification` only through the missing-standard-library branch and its external-spec confirmation gate.
+4. Add or change `assume_specification` only through the missing-standard-library branch.
 5. Do not add new `admit`.
 6. Do not add `#[verifier::external_body]` to skip proof obligations.
 7. Keep edits minimal and localized to the smallest necessary dependency closure.
@@ -123,10 +110,9 @@ After approval, add the external specification and any minimal model, external t
 3. Inspect the entry target file and immediate dependencies.
 4. If `error_message` is provided, use it to prioritize the first repair attempt, but trust fresh command output when they differ.
 5. Reuse the resolved verification command to collect current errors and classify any missing standard-library specification before ordinary proof repair.
-6. If that branch applies, pass the external-spec confirmation gate before editing.
-7. Apply the smallest fix addressing the highest-signal error.
-8. Re-run verification with the same command and working directory.
-9. Repeat until verification succeeds or a real blocker remains.
+6. Apply the smallest fix addressing the highest-signal error.
+7. Re-run verification with the same command and working directory.
+8. Repeat until verification succeeds or a real blocker remains.
 
 Avoid broad refactors up front.
 
