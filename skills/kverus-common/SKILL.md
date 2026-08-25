@@ -17,6 +17,7 @@ Before editing Verus code, load only the relevant reference:
 - Loop or recursive proof failures: read `references/invariants.md`.
 - `ghost`, `tracked`, `Tracked<T>`, `Ghost<T>`, `@`, or erasure issues: read `references/ghost-tracked.md`.
 - Axiom-like declarations, external API specifications, trusted boundaries, or proof cleanup: read `references/proof-engineering-and-trust-boundaries.md`.
+- Missing or incomplete vstd specifications for `std`, `core`, or `alloc` APIs: read `references/std-external-specifications.md` together with `references/proof-engineering-and-trust-boundaries.md`.
 - Asterinas/VOSTD verification commands, repository context, external-spec placement, project proof conventions, or historical examples: read `references/asterinas-vostd-practices.md` in addition to the relevant general reference.
 - Concurrency, invariants, permissions, or state-machine navigation: read `references/tokenized-state-machine.md`.
 - Verus-unsupported features, forced rewrites, or trait associated constant limitations: read `references/unsupported-features/index.md`, then load the relevant topic file from that directory.
