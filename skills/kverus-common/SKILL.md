@@ -28,7 +28,7 @@ Resolve every citation from the target workspace; never assume a machine-specifi
 
 1. Start at the target repository root. If it contains `ostd/`, `verified_libs/`, and `tools/verus/`, treat it as the VOSTD root and `tools/verus/` as the Verus root.
 2. If that layout is absent, inspect the verification command, repository scripts and configuration, and submodule metadata to locate the active Verus checkout. Accept a candidate as the Verus root only when it contains the cited `source/docs/guide/src` and `source/vstd` trees.
-3. Resolve `source/docs/...` and `source/vstd/...` relative to the discovered Verus root. Resolve `ostd/...`, `verified_libs/...`, and `tools/verus/...` relative to the discovered VOSTD root.
+3. Resolve `source/docs/...`, `source/vstd/...`, and `examples/...` relative to the discovered Verus root. Resolve `ostd/...`, `verified_libs/...`, and `tools/verus/...` relative to the discovered VOSTD root.
 4. Keep citations in these root-relative forms instead of resolving them against the skill directory. Confirm a cited file exists before relying on it; if no active checkout can be located, report the unresolved citation rather than inventing a path.
 
 ## Global Verus Guide Rules
@@ -36,11 +36,12 @@ Resolve every citation from the target workspace; never assume a machine-specifi
 Carry these rules into all KVerus skills unless the user explicitly requests a different policy:
 
 1. Follow the active task skill's hard constraints for whether contracts, executable code, assumptions, or external bodies may be changed.
-2. Use `requires`, `ensures`, `assert`, loop invariants, and helper lemmas as the modular verification tools described by the guide.
-3. Use `expr@` as the guide's shorthand for `expr.view()` when working with abstract views.
-4. For loops, add invariants strong enough for entry, preservation, and exit reasoning; include surrounding facts explicitly when loop isolation requires them.
-5. Use `assert(...) by (bit_vector)` for bitwise facts, `assert(...) by (compute_only)` for fully computable spec facts, and `assert(...) by (nonlinear_arith)` for nonlinear arithmetic facts.
-6. Treat `#[verifier::external_body]` as a trusted verified/unverified boundary, not as an ordinary proof hint.
+2. When the active Verus version supports it, prefer `#[verus_spec(...)]` for newly added contracts and loop annotations on executable Rust. Keep `verus!` primarily for spec/proof declarations, external specifications, and syntax that attributes cannot express.
+3. Use `requires`, `ensures`, `assert`, loop invariants, and helper lemmas as the modular verification tools described by the guide.
+4. Use `expr@` as the guide's shorthand for `expr.view()` when working with abstract views.
+5. For loops, add invariants strong enough for entry, preservation, and exit reasoning; include surrounding facts explicitly when loop isolation requires them.
+6. Use `assert(...) by (bit_vector)` for bitwise facts, `assert(...) by (compute_only)` for fully computable spec facts, and `assert(...) by (nonlinear_arith)` for nonlinear arithmetic facts.
+7. Treat `#[verifier::external_body]` as a trusted verified/unverified boundary, not as an ordinary proof hint.
 
 ## Source Basis
 

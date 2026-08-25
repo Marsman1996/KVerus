@@ -31,6 +31,8 @@ If `out_path` is missing, use a reasonable workspace-local default path and repo
 
 ## Shared Verus References
 
+Before adding verification annotations to executable functions or loops, read `../kverus-common/references/verus-syntax-quickref.md`.
+
 If a failure appears caused by Verus syntax, modes, ghost/tracked values, loop invariants, quantifiers, specialized solvers, or tokenized state-machine rules, read the relevant reference under `../kverus-common/references/` before editing.
 
 If verification shows that a `std`, `core`, or `alloc` API has no applicable vstd specification, read both `../kverus-common/references/std-external-specifications.md` and `../kverus-common/references/proof-engineering-and-trust-boundaries.md`. For Asterinas/VOSTD targets, also read `../kverus-common/references/asterinas-vostd-practices.md`.
