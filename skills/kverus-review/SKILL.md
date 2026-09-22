@@ -23,9 +23,9 @@ If `verify` is missing, ask for it and stop. `commit` is optional.
 
 ## Objective
 
-Check uncommitted changes (or changes since a given commit) for three categories of issues and produce a structured report:
+Check uncommitted changes (or changes since a given commit) for four categories of issues and produce a structured report:
 
-1. Exec code modifications and whether they change runtime semantics.
+1. Exec code modifications, whether they change runtime semantics, and whether their preservation comments are compliant.
 2. New `=~=` introductions and whether they can be replaced by `==`.
 3. Deleted comments and whether the deletion is justified.
 4. Verification pass/fail and problematic warnings.
@@ -45,8 +45,10 @@ Locate reference files under the `kverus-common` skill's `references/` directory
 | Verus syntax / modes / exec-vs-spec-vs-proof | `verus-syntax-quickref.md` |
 | Ghost / tracked / erasure | `ghost-tracked.md` |
 | Verification error triage | `common-errors.md` |
+| Exec-code reason and original-source comments | `exec-code-preservation.md` |
 
 When evaluating `=~=` usage, read the "Set Extensional Equality via Bidirectional Forall" section from the `set-reasoning.md` reference.
+When the diff modifies exec code, read and apply `exec-code-preservation.md`.
 
 ## Required Workflow
 
@@ -117,6 +119,11 @@ If any exec code lines are modified, classify each modification:
 | `likely-equivalent` | Syntax or structure changed but executable behavior is preserved: expression restructuring, type annotation additions, equivalent helper extraction, local variable introduction. |
 | `uncertain` | Cannot determine confidently; needs more context, macro expansion, or domain knowledge. |
 
+Separately classify the preservation comment for every exec-code modification as
+`compliant`, `missing`, or `malformed` using `exec-code-preservation.md`. This check is
+required even when the executable change is `likely-equivalent`. A comment does not
+affect the semantic classification.
+
 **Semantic-change heuristics** — classify as `semantic-change` when the change:
 
 - Replaces a computation with a constant, placeholder, stub, or weaker fallback
@@ -156,17 +163,17 @@ For each deleted comment, classify the deletion:
 
 | Classification | Meaning |
 |----------------|---------|
-| `justified` | The deletion is reasonable, e.g.: the commented code corresponds to a function/module that was entirely removed or rewritten; the comment was clearly obsolete (e.g. `// TODO: ...` for a completed task); the comment's content is now duplicated by an updated spec/clause; or the code structure changed making the old commented code no longer relevant. |
+| `justified` | The deletion is reasonable, e.g.: the commented code corresponds to a function/module that was entirely removed or reverted; the comment was clearly obsolete (e.g. `// TODO: ...` for a completed task); the comment's content is now duplicated by an updated spec/clause; or the code structure changed making an ordinary non-provenance comment no longer relevant. |
 | `unjustified` | The deletion removes migration-preserved original Rust code or design rationale without a corresponding structural change that makes it obsolete. |
 | `uncertain` | Cannot determine whether the deletion is justified; needs more context about why the comment existed and why it was removed. |
 
 **Heuristics for judgment:**
 
 - If the deleted comment contains original Rust code (e.g. `// let x = ...`, `// fn old_func()`, `// unsafe { ... }`), check whether the corresponding Verus code still exists and is unchanged. If the Verus code is unchanged but the preserved-Rust comment was deleted, classify as `unjustified` — the comment serves as migration provenance.
-- If the deleted comment is a `// OLD:` or `// Original:` style annotation and the surrounding code was also modified in the same diff, classify as `justified` — the structural change makes the old comment obsolete.
+- If the deleted comment contains `Origin Rust:`, classify deletion as `justified` only when the corresponding executable modification was reverted or removed. When executable code is rewritten again, require an updated compliant preservation comment instead of silently deleting the old one.
 - If the deleted comment is an ordinary code comment (not migration-preserved code), and its content is no longer accurate after the changes, classify as `justified`.
 - If the deleted comment is an ordinary code comment and the surrounding code is unchanged, classify as `uncertain` — the intent of the deletion is unclear.
-- If multiple comments were deleted in a block where the entire function or module was rewritten, classify as `justified`.
+- If multiple ordinary comments were deleted in a block where the entire function or module was rewritten, classify them as `justified` when obsolete. This does not apply to `Origin Rust:` preservation comments, which must be updated to describe the new executable rewrite.
 
 If no comments were deleted, record: "No comment deletions found."
 
@@ -214,10 +221,10 @@ Produce a Markdown report with the following structure:
 
 ## 1. Exec Code Modifications
 
-| File | Lines Changed | Classification | Reason |
-|------|---------------|----------------|--------|
-| path/to/file.rs | L10-L15 (added), L20-L22 (removed) | semantic-change | ... |
-| path/to/file.rs | L30 (added) | likely-equivalent | ... |
+| File | Lines Changed | Classification | Preservation Comment | Reason |
+|------|---------------|----------------|----------------------|--------|
+| path/to/file.rs | L10-L15 (added), L20-L22 (removed) | semantic-change | missing | ... |
+| path/to/file.rs | L30 (added) | likely-equivalent | compliant | ... |
 
 _Or: No exec code modifications found._
 
@@ -231,6 +238,9 @@ _Or: No exec code modifications found._
 
 **uncertain:**
 - **path/to/file.rs**: <description of what changed and why it is ambiguous>
+
+**preservation-comment violations:**
+- **path/to/file.rs**: <missing or malformed reason-first `Origin Rust:` comment>
 
 ## 2. =~= Introductions
 
@@ -275,6 +285,7 @@ _Or: No problematic warnings found._
 - If verification fails, the report MUST include the verification status as `❌ failed` with the error summary.
 - If any problematic warning is found, the report MUST list each one with count and locations.
 - If any exec code modification is classified as `semantic-change`, highlight it prominently.
+- If any exec-code preservation comment is `missing` or `malformed`, highlight it prominently.
 - If any deleted comment is classified as `unjustified` or `uncertain`, highlight it prominently.
 - Be conservative: when in doubt, classify as `uncertain` rather than `likely-equivalent`.
 
