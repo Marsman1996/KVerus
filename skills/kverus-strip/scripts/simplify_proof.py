@@ -5,9 +5,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import argparse
+import os
 import re
+import signal
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -218,7 +221,6 @@ try:
                     "assert_by_expression",
                     "assert_by_block_expression",
                     "assert_forall_expression",
-                    "assert_macro_call",
                 }:
                     mapped_start = original_base + child.start_byte - wrapped_prefix_len
                     mapped_end = original_base + child.end_byte - wrapped_prefix_len
@@ -311,7 +313,6 @@ try:
                     "assert_by_expression",
                     "assert_by_block_expression",
                     "assert_forall_expression",
-                    "assert_macro_call",
                 }:
                     self._append_assert(child)
                 elif child.type == "call_expression":
@@ -433,12 +434,37 @@ try:
         def get(self) -> dict:
             return {"functions": self.map_func_info}
 
-except ImportError:
-    # Default mode requires tree-sitter-verus; main() errors out if it is missing
-    # unless --text-only was passed. Keep SimplifyParser/FunctionRangeParser as None
-    # so --text-only mode (CompatSimplifyParser + fallback ranges) still works.
-    SimplifyParser = None
-    FunctionRangeParser = None
+except ImportError as _import_err:
+    # tree-sitter-verus and loguru are assumed present; fail loudly if missing.
+    raise SystemExit(
+        f"tree-sitter-verus/loguru is required but failed to import: {_import_err}. "
+        f"Run `uv sync` in the KVerus repo and re-run."
+    ) from _import_err
+
+
+try:
+    from tqdm import tqdm as tqdm_class
+except ImportError as _import_err:  # pragma: no cover
+    raise SystemExit(
+        f"tqdm is required but failed to import: {_import_err}. "
+        f"Run `uv sync` in the KVerus repo and re-run."
+    ) from _import_err
+
+
+def _log_sink(message: str) -> None:
+    """Render a loguru record above the active tqdm bar, one clean line."""
+    tqdm_class.write(message.rstrip("\n") + "\n", end="")
+
+
+# Route loguru output through tqdm.write so per-step logs appear above the
+# progress bar instead of corrupting it.
+logger.remove()
+logger.add(
+    _log_sink,
+    level="INFO",
+    format="<green>{time:HH:mm:ss}</green> <level>{level: <7}</level> {message}",
+    colorize=sys.stderr.isatty(),
+)
 
 
 @dataclass(frozen=True)
@@ -470,6 +496,7 @@ class SimplifyStats:
     call_attempted: int = 0
     call_removed: int = 0
     verification_runs: int = 0
+    kept_as_perf_hint: int = 0
 
     def add(self, other: "SimplifyStats") -> None:
         self.files_processed += other.files_processed
@@ -483,36 +510,11 @@ class SimplifyStats:
         self.call_attempted += other.call_attempted
         self.call_removed += other.call_removed
         self.verification_runs += other.verification_runs
+        self.kept_as_perf_hint += other.kept_as_perf_hint
 
 
-class CompatSimplifyParser:
-    """Compatibility parser with the subset used by src.refiner.simplifier."""
-
-    def __init__(self, code: str):
-        self.code = code
-        self.asserts: list[dict[str, int]] = []
-        self.calls: list[dict[str, int | bool]] = []
-        self.admits: list[dict[str, int]] = []
-        self.assumes: list[dict[str, int]] = []
-        self.attributes: list[str] = []
-
-    @classmethod
-    def from_code(cls, code: str) -> "CompatSimplifyParser":
-        return cls(code)
-
-    def parse(self) -> None:
-        masked = mask_comments_and_strings(self.code)
-        self.attributes = (
-            ["verifier::external_body"] if "verifier::external_body" in masked else []
-        )
-        self.admits = discover_calls(masked, self.code, "admit")
-        self.assumes = discover_calls(masked, self.code, "assume")
-        self.asserts = discover_asserts(masked, self.code)
-
-
-def simplify_parser_from_code(code: str, text_only: bool = False):
-    parser_type = CompatSimplifyParser if text_only else SimplifyParser
-    parser = parser_type.from_code(code)
+def simplify_parser_from_code(code: str):
+    parser = SimplifyParser.from_code(code)
     parser.parse()
     return parser
 
@@ -584,8 +586,8 @@ def changed_rs_files(repo_root: Path, base: str | None) -> list[Path]:
             )
         else:
             detail = (result.stderr or result.stdout).strip()
-            print(
-                f"INFO: could not discover changed files from base {base!r}: {detail}"
+            logger.warning(
+                f"could not discover changed files from base {base!r}: {detail}"
             )
 
     worktree = run_git(repo_root, ["diff", "--name-only"], check=False)
@@ -663,8 +665,8 @@ def collect_files(args: argparse.Namespace, repo_root: Path) -> list[Path]:
                 elif root.is_dir():
                     files.extend(sorted(root.rglob("*.rs")))
                 else:
-                    print(
-                        f"WARN: target path does not exist or is not Rust: {target_dir}"
+                    logger.warning(
+                        f"target path does not exist or is not Rust: {target_dir}"
                     )
         else:
             files = changed_rs_files(repo_root, args.base)
@@ -828,98 +830,6 @@ def find_matching(text: str, start: int, open_ch: str, close_ch: str) -> int | N
     return None
 
 
-def find_statement_end(masked: str, start: int) -> int | None:
-    i = start
-    while i < len(masked):
-        c = masked[i]
-        if c in "({[":
-            match = find_matching(masked, i, c, {"(": ")", "{": "}", "[": "]"}[c])
-            if match is None:
-                return None
-            i = match + 1
-            continue
-        if c == ";":
-            return i + 1
-        i += 1
-    return None
-
-
-def discover_calls(masked: str, source: str, name: str) -> list[dict[str, int]]:
-    calls = []
-    idx = 0
-    while True:
-        idx = masked.find(name, idx)
-        if idx == -1:
-            break
-        before = masked[idx - 1] if idx > 0 else " "
-        after_idx = idx + len(name)
-        after = masked[after_idx] if after_idx < len(masked) else " "
-        if is_ident_char(before) or is_ident_char(after):
-            idx = after_idx
-            continue
-        j = after_idx
-        while j < len(masked) and masked[j].isspace():
-            j += 1
-        if j < len(masked) and masked[j] == "!":
-            j += 1
-            while j < len(masked) and masked[j].isspace():
-                j += 1
-        if j < len(masked) and masked[j] == "(":
-            end = find_statement_end(masked, idx)
-            if end is not None:
-                calls.append(
-                    {"start": byte_offset(source, idx), "end": byte_offset(source, end)}
-                )
-                idx = end
-                continue
-        idx = after_idx
-    return calls
-
-
-def discover_asserts(masked: str, source: str) -> list[dict[str, int]]:
-    asserts = []
-    idx = 0
-    while True:
-        idx = masked.find("assert", idx)
-        if idx == -1:
-            break
-        before = masked[idx - 1] if idx > 0 else " "
-        after_idx = idx + len("assert")
-        after = masked[after_idx] if after_idx < len(masked) else " "
-        if is_ident_char(before) or is_ident_char(after):
-            idx = after_idx
-            continue
-        j = after_idx
-        while j < len(masked) and masked[j].isspace():
-            j += 1
-        # Keep Rust runtime assert! calls. Verus proof asserts use assert(...).
-        if j < len(masked) and masked[j] == "!":
-            idx = j + 1
-            continue
-        if not (
-            j < len(masked)
-            and (
-                masked[j] == "("
-                or masked.startswith("forall", j)
-                or masked.startswith("exists", j)
-            )
-        ):
-            idx = j + 1
-            continue
-        end = find_statement_end(masked, idx)
-        if end is None:
-            idx = after_idx
-            continue
-        asserts.append(
-            {"start": byte_offset(source, idx), "end": byte_offset(source, end)}
-        )
-        # Continue immediately after the keyword rather than after the whole
-        # statement.  An assertion's `by` block may contain further assertions,
-        # all of which must be considered independently.
-        idx = after_idx
-    return asserts
-
-
 def is_assert_false(segment: str) -> bool:
     masked = mask_comments_and_strings(segment)
     return re.match(r"\s*assert\s*\(\s*false\s*\)", masked) is not None
@@ -993,9 +903,6 @@ def parse_location_line(location: str) -> tuple[str | None, int, int]:
 
 
 def treesitter_function_ranges(path: Path, text: str) -> list[FunctionRange]:
-    if FunctionRangeParser is None:
-        return []
-
     try:
         parser = FunctionRangeParser.from_file(path.resolve())
         parser.parse()
@@ -1003,8 +910,8 @@ def treesitter_function_ranges(path: Path, text: str) -> list[FunctionRange]:
     except (
         Exception
     ) as err:  # pragma: no cover - parser availability is environment-specific.
-        print(
-            f"INFO: tree-sitter-verus could not parse {path}: {err}; using fallback parser."
+        logger.warning(
+            f"tree-sitter-verus could not parse {path}: {err}; using fallback parser."
         )
         return []
 
@@ -1041,12 +948,8 @@ def dedupe_ranges(ranges: list[FunctionRange]) -> list[FunctionRange]:
     return out
 
 
-def discover_function_ranges(
-    path: Path, text: str, text_only: bool = False
-) -> list[FunctionRange]:
-    ranges: list[FunctionRange] = []
-    if not text_only:
-        ranges = treesitter_function_ranges(path, text)
+def discover_function_ranges(path: Path, text: str) -> list[FunctionRange]:
+    ranges = treesitter_function_ranges(path, text)
     if ranges:
         return ranges
     ranges = fallback_function_ranges(path, text)
@@ -1120,9 +1023,12 @@ def candidate_ranges_from_code(
     source_text: str,
     range_start: int,
     deep_clean: bool,
-    text_only: bool = False,
-) -> tuple[list[CandidateRange], bool]:
-    parser = simplify_parser_from_code(code, text_only=text_only)
+) -> tuple[list[CandidateRange], bool, bool]:
+    """Return this function's strippable candidates plus two flags:
+    (candidates, skipped_unproven, rlimit_budgeted). rlimit_budgeted means the
+    function carries a `#[verifier::rlimit(...)]` budget, i.e. the perf guard's
+    rlimit check applies to it."""
+    parser = simplify_parser_from_code(code)
     has_external_body = any(
         "verifier::external_body"
         in (
@@ -1132,8 +1038,9 @@ def candidate_ranges_from_code(
         )
         for item in parser.attributes
     )
+    rlimit_budgeted = has_rlimit_marker(parser.attributes)
     if not deep_clean and (parser.admits or parser.assumes or has_external_body):
-        return [], True
+        return [], True, rlimit_budgeted
 
     code_bytes = code.encode("utf-8")
     candidates: list[CandidateRange] = []
@@ -1178,7 +1085,7 @@ def candidate_ranges_from_code(
     # every original byte range valid while simplify_file incrementally blanks
     # candidates from the same function.
     candidates.sort(key=lambda item: (item.end - item.start, item.start))
-    return candidates, False
+    return candidates, False, rlimit_budgeted
 
 
 def run_shell(
@@ -1196,31 +1103,196 @@ def run_shell(
     )
 
 
-def run_verify(command: str, cwd: Path, timeout: int) -> bool:
-    result = run_shell(command, cwd, timeout)
-    return result.returncode == 0
+# A line that looks like a rust/cargo/verus error (e.g. "error: ...", "error[E0308]: ...").
+# `stderr=STDOUT` merges the verifier's stderr into the stream we read, so this sees both.
+_VERIFY_ERR_RE = re.compile(r"^\s*error\b", re.IGNORECASE)
 
 
-def simplify_file(
-    repo_root: Path,
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the verify subprocess and any z3/rustc children it spawned."""
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        except OSError:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    else:  # Windows has no process groups; best-effort tree kill via taskkill.
+        try:
+            subprocess.run(
+                ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+def run_verify_failfast(command: str, cwd: Path, timeout: int) -> tuple[bool, str]:
+    """Run the verify command, killing the whole process group on the first
+    `error:` line instead of waiting for verus to finish collecting the ~5
+    `--multiple-errors` re-query diagnostics that `dv` hardcodes. Returns
+    `(ok, combined_output)`, with output streamed live so an error aborts fast.
+
+    Stripping only needs a pass/fail verdict, so aborting on the first error is
+    sound: an aborted run is a failing run just like `returncode != 0`, so the
+    set of candidates kept is unchanged -- only failing verifications get
+    faster. Degrades to current behavior (return after completion) if the build
+    happens to block-buffer its output.
+    """
+    popen_kwargs: dict[str, object] = dict(
+        shell=True,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True  # own group so killpg reaps z3
+    proc = subprocess.Popen(command, **popen_kwargs)
+    chunks: list[str] = []
+    saw_error = threading.Event()
+
+    def _reader() -> None:
+        try:
+            for line in proc.stdout:
+                chunks.append(line)
+                if saw_error.is_set():
+                    continue
+                if _VERIFY_ERR_RE.match(line):
+                    saw_error.set()
+                    _kill_process_group(proc)
+        except Exception:
+            pass
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+    try:
+        proc.wait(timeout=timeout if timeout > 0 else None)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            pass
+        reader.join(timeout=2)
+        raise
+    reader.join(timeout=2)
+    ok = proc.returncode == 0 and not saw_error.is_set()
+    return ok, "".join(chunks)
+
+
+# `--time` makes verus print `total smt-run: N ms, R rlimit` -- R is Z3's rlimit count,
+# the deterministic resource units the solver consumed, with no cargo-rebuild /
+# front-end floor. The perf guard measures R (not wall time): rlimit counts solver
+# work in machine-independent units, so machine load, CPU frequency, warm/cold
+# caches can't pollute `--perf-factor`. (Verus scales its `--rlimit` flag at
+# 3,000,000 rlimit units per "second" of Z3 work.)
+_SMT_RUN_RE = re.compile(r"total smt-run:\s+(\d+)\s+ms(?:,\s*(\d+)\s*rlimit)?")
+
+
+def _parse_smt_run_stats(output: str) -> tuple[float | None, int | None]:
+    """Return verus's total (smt-run wall ms, Z3 rlimit count), either possibly
+    None: the rlimit is absent on older verus without rlimit stats; both are
+    absent when the run was killed by fail-fast before printing, or when
+    cargo-verus skipped verification because the file content was unchanged."""
+    match = _SMT_RUN_RE.search(output)
+    if not match:
+        return None, None
+    ms = float(match.group(1))
+    rlimit = int(match.group(2)) if match.group(2) is not None else None
+    return ms, rlimit
+
+
+# An explicit per-function solver budget, e.g. `#[verifier::rlimit(50)]`. The
+# rlimit part of the perf guard is scoped to functions carrying this marker:
+# only they have a real cap a strip could push toward or past. Functions
+# without a marker verify under the default budget, so their strips are
+# decided purely on pass/fail and no baseline rlimit probe is spent on them.
+# Matched against the inner text of tree-sitter `attribute` nodes (the node
+# spans `verifier::rlimit(50)` without the `#[...]` wrapper), so mentions
+# inside comments or strings cannot trigger it the way raw regex on the source
+# would.
+_RLIMIT_MARKER_RE = re.compile(r"verifier\s*::\s*rlimit\s*\(")
+
+
+def has_rlimit_marker(attributes: list) -> bool:
+    """Whether the parsed attribute list contains a `#[verifier::rlimit(...)]`."""
+    return any(
+        _RLIMIT_MARKER_RE.search(str(item.get("attribute", ""))) for item in attributes
+    )
+
+
+# Matches verus's --verify-function rejection emitted on failure when the supplied
+# function pattern is ambiguous (more than one match) or not found in the module.
+_VERIFY_FUNCTION_AMBIGUITY_RE = re.compile(
+    r"could not find function|more than one match found for --verify-function",
+    re.IGNORECASE,
+)
+
+# Matches the `--verify-function {fn}` clause in --verify-command so we can strip
+# it when falling back to whole-module verification. Handles both the
+# `--verify-function {fn}` (space) and `--verify-function={fn}` (equals) forms.
+_VERIFY_FUNCTION_CLAUSE_RE = re.compile(
+    r"\s*--verify-function\s*=\s*\{fn\}|\s*--verify-function\s+\{fn\}"
+)
+
+
+class StripProgress:
+    """tqdm-backed progress over candidate decisions."""
+
+    def __init__(self, desc: str = "strip", unit: str = "cand", total: int = 0) -> None:
+        self._bar = tqdm_class(
+            total=total, desc=desc, unit=unit, dynamic_ncols=True, leave=True
+        )
+
+    def advance(self, n: int = 1) -> None:
+        self._bar.update(n)
+
+    def set_description(self, desc: str) -> None:
+        self._bar.set_description(desc)
+
+    def close(self) -> None:
+        self._bar.close()
+
+
+@dataclass(frozen=True)
+class RangePlan:
+    """Pre-strip function ranges for one file plus filter diagnostics.
+
+    The diagnostics feed the per-file scan log emitted once in the discover
+    pass, not re-emitted during the strip pass.
+    """
+
+    ranges: list[FunctionRange]
+    raw_count: int
+    function_filtered: int | None
+    modified_before: int | None
+    modified_after: int | None
+    has_added_hunks: bool | None
+
+
+def compute_function_ranges(
     path: Path,
-    verify_command: str,
-    timeout: int,
-    dry_run: bool,
-    deep_clean: bool,
-    batch: bool,
+    text: str,
     functions: list[str] | None = None,
     modified_hunks_map: dict[Path, list[tuple[int, int]]] | None = None,
-    text_only: bool = False,
-) -> SimplifyStats:
-    stats = SimplifyStats(files_processed=1)
-    try:
-        text = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        print(f"WARN: skipping non-UTF-8 file: {relative_to_repo(repo_root, path)}")
-        return stats
+) -> RangePlan:
+    """Apply the --function and --modified-only filters to a file's functions.
 
-    ranges = discover_function_ranges(path, text, text_only=text_only)
+    Pure parse, no verify, no edit -- shared by the sizing (discover) pass and
+    the strip pass so their views of which functions are in scope stay identical.
+    """
+    ranges = discover_function_ranges(path, text)
+    raw_count = len(ranges)
+    function_filtered: int | None = None
     if functions:
         ranges = [
             fn_range
@@ -1231,20 +1303,15 @@ def simplify_file(
                 functions,
             )
         ]
-        display_path = relative_to_repo(repo_root, path)
-        names = ", ".join(n for n in functions if n)
-        print(
-            f"INFO: function filter '{names}' matched {len(ranges)} function(s) "
-            f"in {display_path}."
-        )
+        function_filtered = len(ranges)
+    modified_before: int | None = None
+    modified_after: int | None = None
+    has_added_hunks: bool | None = None
     if modified_hunks_map is not None:
         hunks = modified_hunks_map.get(path.resolve(), [])
-        display_path = relative_to_repo(repo_root, path)
+        modified_before = len(ranges)
+        has_added_hunks = bool(hunks)
         if not hunks:
-            print(
-                f"INFO: --modified-only: no added lines in {display_path}; "
-                f"skipping all functions."
-            )
             ranges = []
         else:
             kept: list[FunctionRange] = []
@@ -1255,25 +1322,136 @@ def simplify_file(
                     for hunk_first, hunk_last in hunks
                 ):
                     kept.append(fn_range)
-            print(
-                f"INFO: --modified-only: {len(kept)}/{len(ranges)} function(s) "
-                f"overlap added diff hunks in {display_path}."
-            )
             ranges = kept
+        modified_after = len(ranges)
+    return RangePlan(
+        ranges=ranges,
+        raw_count=raw_count,
+        function_filtered=function_filtered,
+        modified_before=modified_before,
+        modified_after=modified_after,
+        has_added_hunks=has_added_hunks,
+    )
+
+
+def count_file_candidates(
+    repo_root: Path,
+    path: Path,
+    functions: list[str] | None,
+    modified_hunks_map: dict[Path, list[tuple[int, int]]] | None,
+    deep_clean: bool,
+) -> int:
+    """Pure-parse pass over one file: count strippable candidates (no verify, no
+    edit). Sizes the strip pass's tqdm total so its denominator is fixed up front
+    and its ETA is trustworthy; mirrors the strip pass's candidate discovery so
+    the count matches what actually gets processed."""
+    display_path = relative_to_repo(repo_root, path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return 0
+    plan = compute_function_ranges(path, text, functions, modified_hunks_map)
+    # Emit the per-file filter diagnostics once here, not again during the strip
+    # pass (which re-runs the same parse and would duplicate the lines).
+    if functions:
+        names = ", ".join(n for n in functions if n)
+        logger.info(
+            f"function filter '{names}' matched {plan.function_filtered} "
+            f"function(s) in {display_path}"
+        )
+    if modified_hunks_map is not None:
+        if not plan.has_added_hunks:
+            logger.info(
+                f"--modified-only: no added lines in {display_path}; "
+                f"skipping all functions"
+            )
+        else:
+            logger.info(
+                f"--modified-only: {plan.modified_after}/{plan.modified_before} "
+                f"function(s) overlap added diff hunks in {display_path}"
+            )
     current_bytes = text.encode("utf-8")
+    count = 0
+    for function_range in plan.ranges:
+        code = current_bytes[function_range.start : function_range.end].decode("utf-8")
+        candidates, skipped_unproven, _rlimit_budgeted = candidate_ranges_from_code(
+            code, text, function_range.start, deep_clean
+        )
+        if skipped_unproven:
+            continue
+        count += len(candidates)
+    return count
+
+
+def simplify_file(
+    repo_root: Path,
+    path: Path,
+    verify_command: str,
+    timeout: int,
+    dry_run: bool,
+    deep_clean: bool,
+    perf_factor: float | None = None,
+    functions: list[str] | None = None,
+    modified_hunks_map: dict[Path, list[tuple[int, int]]] | None = None,
+    progress: StripProgress | None = None,
+) -> SimplifyStats:
+    stats = SimplifyStats(files_processed=1)
+    display_path = relative_to_repo(repo_root, path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        logger.warning(f"skipping non-UTF-8 file: {display_path}")
+        return stats
+
+    ranges = compute_function_ranges(path, text, functions, modified_hunks_map).ranges
+    current_bytes = text.encode("utf-8")
+    # The perf guard measures verus's Z3 rlimit count (`total smt-run: N ms, R rlimit`,
+    # printed by --time), not wall time -- so cold vs warm rebuilds and machine load
+    # don't pollute --perf-factor.
+    if perf_factor is not None and "--time" not in verify_command:
+        verify_command = f"{verify_command} --time"
+    use_per_fn = "{fn}" in verify_command
+    module_cmd = (
+        _VERIFY_FUNCTION_CLAUSE_RE.sub("", verify_command, count=1)
+        if use_per_fn
+        else verify_command
+    )
+    baseline_probes = 0  # unique trailing-newline count per baseline verify
     for function_range in ranges:
         stats.functions_processed += 1
         code = current_bytes[function_range.start : function_range.end].decode("utf-8")
-        candidates, skipped_unproven = candidate_ranges_from_code(
+        candidates, skipped_unproven, rlimit_budgeted = candidate_ranges_from_code(
             code,
             text,
             function_range.start,
             deep_clean,
-            text_only=text_only,
         )
         if skipped_unproven:
             stats.functions_skipped_unproven += 1
             continue
+
+        # Per-function verify scoping: when --verify-command contains a literal
+        # `{fn}` placeholder (written as `--verify-function {fn}`), substitute the
+        # current function's short name so verus verifies only it instead of the
+        # whole module. If the name can't be resolved, or verus rejects it as
+        # ambiguous/not-found, fall back to the clause-stripped (whole-module)
+        # command for the remainder of this function.
+        fn_name = function_name_from_slice(code) if use_per_fn else None
+        if use_per_fn and not fn_name:
+            cur_cmd = module_cmd
+            fn_scope_broken = True
+            logger.warning(
+                f"unresolvable function name in {display_path}; using module-level verify"
+            )
+        elif use_per_fn:
+            cur_cmd = verify_command.replace("{fn}", fn_name)
+            fn_scope_broken = False
+        else:
+            cur_cmd = verify_command
+            fn_scope_broken = False
+
+        if progress is not None:
+            progress.set_description(f"strip {display_path}::{fn_name or 'fn'}")
 
         def record_attempt(item: CandidateRange, removed: bool) -> None:
             stats.attempted += 1
@@ -1289,8 +1467,9 @@ def simplify_file(
                 stats.removed += 1
             else:
                 stats.restored += 1
+            if progress is not None:
+                progress.advance(1)
 
-        display_path = relative_to_repo(repo_root, path)
         if dry_run:
             for item in candidates:
                 stats.attempted += 1
@@ -1298,10 +1477,11 @@ def simplify_file(
                     stats.assert_attempted += 1
                 else:
                     stats.call_attempted += 1
-                print(
-                    f"INFO: trying {item.kind} {display_path}:{item.line}: "
-                    f"{item.preview}"
+                logger.info(
+                    f"trying {item.kind} {display_path}:{item.line}: {item.preview}"
                 )
+            if progress is not None:
+                progress.advance(len(candidates))
             continue
 
         def blank_items(base: bytes, items: list[CandidateRange]) -> bytes:
@@ -1310,79 +1490,136 @@ def simplify_file(
                 result[item.start : item.end] = b" " * (item.end - item.start)
             return bytes(result)
 
-        def verify_candidate_bytes(candidate_bytes: bytes) -> bool:
+        def verify_candidate_bytes(
+            candidate_bytes: bytes,
+        ) -> tuple[bool, str]:
+            nonlocal cur_cmd, fn_scope_broken
             path.write_bytes(candidate_bytes)
             stats.verification_runs += 1
             try:
-                return run_verify(verify_command, repo_root, timeout)
+                ok, output = run_verify_failfast(cur_cmd, repo_root, timeout)
             except BaseException:
                 path.write_bytes(current_bytes)
                 raise
-
-        if batch:
-
-            def simplify_batch(items: list[CandidateRange]) -> None:
-                nonlocal current_bytes
-                if not items:
-                    return
-                print(
-                    f"INFO: trying batch {display_path}: "
-                    f"candidates={len(items)}, lines={items[0].line}-{items[-1].line}"
+            if (
+                not ok
+                and use_per_fn
+                and not fn_scope_broken
+                and _VERIFY_FUNCTION_AMBIGUITY_RE.search(output)
+            ):
+                # verus rejected --verify-function (ambiguous/not found) -> use
+                # whole-module verify for this function from now on, and re-run the
+                # current candidate so a command error isn't mistaken for a real
+                # proof failure.
+                fn_scope_broken = True
+                cur_cmd = module_cmd
+                logger.warning(
+                    f"--verify-function {fn_name} not usable in {display_path} "
+                    f"(ambiguous/not found); falling back to module-level verify"
                 )
-                candidate_bytes = blank_items(current_bytes, items)
-                if verify_candidate_bytes(candidate_bytes):
-                    current_bytes = candidate_bytes
-                    for item in items:
-                        record_attempt(item, removed=True)
-                    print(
-                        f"INFO: removed redundant batch at {display_path}: "
-                        f"candidates={len(items)}"
-                    )
-                    return
+                stats.verification_runs += 1
+                try:
+                    ok, output = run_verify_failfast(cur_cmd, repo_root, timeout)
+                except BaseException:
+                    path.write_bytes(current_bytes)
+                    raise
+            return ok, output
 
-                path.write_bytes(current_bytes)
-                if len(items) == 1:
-                    item = items[0]
-                    record_attempt(item, removed=False)
-                    print(
-                        f"INFO: kept required {item.kind} at "
-                        f"{display_path}:{item.line}"
-                    )
-                    return
-
-                midpoint = len(items) // 2
-                simplify_batch(items[:midpoint])
-                simplify_batch(items[midpoint:])
-
-            simplify_batch(candidates)
-            continue
+        # Measure this function's pre-strip baseline rlimit (verus `--time`'s
+        # `total smt-run: N ms, R rlimit` -- Z3's deterministic resource count) so
+        # the perf guard measures the REAL verification cost, robust to machine
+        # load and cold vs warm rebuilds. Done through verify_candidate_bytes so
+        # the {fn}-ambiguity fallback keeps the baseline's scope consistent with
+        # each candidate run.
+        # The probe suffix (extra trailing newlines, unique per baseline) forces
+        # cargo-verus to actually re-verify: re-verifying byte-identical content
+        # right after a successful run is a cached no-op that prints no stats and
+        # would silently disable the guard. Trailing newlines don't change the
+        # encoding, so the measured rlimit is the true baseline.
+        # The rlimit guard only applies to functions with an explicit
+        # `#[verifier::rlimit(...)]` budget: only they have a real cap a strip
+        # could push toward, so a passing strip that raises their raw rlimit is
+        # reverted to preserve the author-sized budget. Functions without the
+        # marker verify under the default budget, where a passing strip is fine
+        # regardless of the rlimit delta -- for them the guard (and its baseline
+        # probe verify run) is skipped entirely and passing strips are kept.
+        if perf_factor is not None and not rlimit_budgeted:
+            _rlimit_base = None
+            logger.info(
+                f"no #[verifier::rlimit(...)] marker on "
+                f"{display_path}::{fn_name or 'fn'}; perf guard off, "
+                f"stripping decided on pass/fail only"
+            )
+        elif perf_factor is not None:
+            baseline_probes += 1
+            _base_ok, _base_out = verify_candidate_bytes(
+                current_bytes + b"\n" * baseline_probes
+            )
+            path.write_bytes(current_bytes)
+            if not _base_ok:
+                logger.warning(
+                    f"baseline verify failed for {display_path}::{fn_name or 'fn'}; "
+                    f"skipping strip"
+                )
+                continue
+            _, _rlimit_base = _parse_smt_run_stats(_base_out)
+            if _rlimit_base is None or _rlimit_base <= 0:
+                logger.warning(
+                    f"no 'total smt-run: N ms, R rlimit' in baseline output for "
+                    f"{display_path}::{fn_name or 'fn'} ('--time' missing or verus "
+                    f"without rlimit stats); perf guard disabled for this function"
+                )
+            else:
+                logger.info(
+                    f"baseline {display_path}::{fn_name or 'fn'}: "
+                    f"rlimit {_rlimit_base} -> revert any strip whose rlimit "
+                    f"exceeds {perf_factor:g}x = "
+                    f"{perf_factor * _rlimit_base:.0f}"
+                )
+        else:
+            _rlimit_base = None
 
         for item in candidates:
-            print(
-                f"INFO: trying {item.kind} {display_path}:{item.line}: "
-                f"{item.preview}"
+            logger.info(
+                f"trying {item.kind} {display_path}:{item.line}: {item.preview}"
             )
             candidate_bytes = blank_items(current_bytes, [item])
-            if verify_candidate_bytes(candidate_bytes):
+            ok, _out = verify_candidate_bytes(candidate_bytes)
+            _, _rlimit_after = _parse_smt_run_stats(_out)
+            perf_held = (
+                ok
+                and _rlimit_base is not None
+                and _rlimit_base > 0
+                and _rlimit_after is not None
+                and _rlimit_after > perf_factor * _rlimit_base
+            )
+            if ok and not perf_held:
                 current_bytes = candidate_bytes
                 record_attempt(item, removed=True)
-                print(
-                    f"INFO: removed redundant {item.kind} at "
-                    f"{display_path}:{item.line}"
+                logger.info(
+                    f"removed redundant {item.kind} at {display_path}:{item.line}"
                 )
             else:
                 path.write_bytes(current_bytes)
                 record_attempt(item, removed=False)
-                print(
-                    f"INFO: kept required {item.kind} at " f"{display_path}:{item.line}"
-                )
+                if perf_held:
+                    stats.kept_as_perf_hint += 1
+                    logger.info(
+                        f"kept {item.kind} at {display_path}:{item.line} as perf hint "
+                        f"(rlimit {_rlimit_after} > {perf_factor:g}x baseline "
+                        f"{_rlimit_base})"
+                    )
+                else:
+                    logger.info(
+                        f"kept required {item.kind} at {display_path}:{item.line}"
+                    )
     return stats
 
 
 def modified_rs_files(repo_root: Path) -> list[str]:
     result = run_git(repo_root, ["diff", "--name-only"], check=False)
     if result.returncode != 0:
-        print("WARN: failed to discover modified files for cleanup.")
+        logger.warning("failed to discover modified files for cleanup")
         return []
     return [
         line.strip()
@@ -1398,7 +1635,7 @@ def added_empty_lines(repo_root: Path, file_path: str) -> list[int]:
         check=False,
     )
     if result.returncode != 0:
-        print(f"WARN: failed to diff file for cleanup: {file_path}")
+        logger.warning(f"failed to diff file for cleanup: {file_path}")
         return []
 
     lines_to_remove: list[int] = []
@@ -1425,10 +1662,10 @@ def remove_lines(repo_root: Path, file_path: str, line_numbers: list[int]) -> in
     try:
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     except UnicodeDecodeError:
-        print(f"WARN: skipping cleanup for non-UTF-8 file: {file_path}")
+        logger.warning(f"skipping cleanup for non-UTF-8 file: {file_path}")
         return 0
     except FileNotFoundError:
-        print(f"WARN: skipping cleanup for missing file: {file_path}")
+        logger.warning(f"skipping cleanup for missing file: {file_path}")
         return 0
 
     removed = 0
@@ -1449,7 +1686,7 @@ def cleanup_added_empty_lines(repo_root: Path) -> int:
             repo_root, file_path, added_empty_lines(repo_root, file_path)
         )
     if removed:
-        print(f"INFO: cleanup removed {removed} formatter-introduced empty line(s).")
+        logger.info(f"cleanup removed {removed} formatter-introduced empty line(s)")
     return removed
 
 
@@ -1459,7 +1696,7 @@ def run_format_and_cleanup(args: argparse.Namespace, repo_root: Path) -> int:
     result = run_shell(args.format_command, repo_root, args.timeout)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
-        print(f"WARN: format command failed: {detail}")
+        logger.warning(f"format command failed: {detail}")
         return result.returncode
     if not args.no_cleanup:
         cleanup_added_empty_lines(repo_root)
@@ -1481,7 +1718,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--verify-command",
         default=None,
-        help="Verification command to run after each temporary assert removal.",
+        help=(
+            "Verification command to run after each temporary assert removal. "
+            "May contain a literal `{fn}` placeholder written as "
+            "`--verify-function {fn}` (or `--verify-function={fn}`): the script "
+            "substitutes each stripped function's name so verus verifies only "
+            "that function, which is much faster than verifying the whole module. "
+            "Functions whose name is ambiguous/unresolvable automatically fall "
+            "back to the command with the `--verify-function {fn}` clause removed."
+        ),
     )
     parser.add_argument(
         "--format-command",
@@ -1527,14 +1772,37 @@ def parse_args() -> argparse.Namespace:
         help="Simplify functions containing admits/assumes/external_body.",
     )
     parser.add_argument(
-        "--batch",
-        action="store_true",
-        help="Try candidate groups first and bisect failed groups.",
-    )
-    parser.add_argument(
         "--no-cleanup",
         action="store_true",
         help="Do not remove formatter-introduced added empty lines.",
+    )
+    parser.add_argument(
+        "--perf-factor",
+        type=float,
+        default=1.0,
+        help=(
+            "Max allowed Z3 resource slowdown factor vs each function's pre-strip "
+            "baseline (default 1.0 = 0 percent), measured from verus `--time`'s "
+            "`total smt-run: N ms, R rlimit` (Z3's deterministic rlimit count, "
+            "machine-independent, no rebuild / front-end floor) so cold vs warm "
+            "rebuilds and machine load don't pollute it. Only applies to functions "
+            "with an explicit `#[verifier::rlimit(...)]` budget: those have a real "
+            "cap a strip could push toward, so a passing strip that strictly "
+            "exceeds perf_factor*baseline is reverted (kept as Z3 guidance) to "
+            "preserve the author-sized budget. Functions without the marker strip "
+            "purely on pass/fail -- no rlimit check, and no baseline probe verify. "
+            "rlimit is deterministic, so no jitter margin is needed. `--time` is "
+            "auto-appended to the verify command. Use --no-perf-guard to disable."
+        ),
+    )
+    parser.add_argument(
+        "--no-perf-guard",
+        action="store_true",
+        help=(
+            "Disable the --perf-factor rlimit guard (strip purely on pass/fail, "
+            "i.e. treat every function as if it had no #[verifier::rlimit(...)] "
+            "marker)."
+        ),
     )
     parser.add_argument(
         "--modified-only",
@@ -1547,15 +1815,6 @@ def parse_args() -> argparse.Namespace:
             "proof code."
         ),
     )
-    parser.add_argument(
-        "--text-only",
-        action="store_true",
-        help=(
-            "Use text-based parsing only (asserts-only), without tree-sitter-verus. "
-            "The default mode requires tree-sitter-verus installed; pass this flag "
-            "to opt into the lower-precision text fallback for environments without it."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -1565,23 +1824,24 @@ def main() -> int:
 
     verify_command = args.verify_command
     if not verify_command and not args.dry_run:
-        print("INFO: assert simplification skipped; pass --verify-command.")
+        logger.info("assert simplification skipped; pass --verify-command")
         return 0
     if not verify_command:
         verify_command = "true"
 
-    if not args.text_only and SimplifyParser is None:
-        print(
-            "ERROR: tree-sitter-verus is required for the default mode but is not "
-            "available. Install it (e.g. `cd <KVerus repo> && uv sync`), or pass "
-            "--text-only for text-based (asserts-only) parsing.",
-            file=sys.stderr,
+    if "{fn}" in verify_command and not _VERIFY_FUNCTION_CLAUSE_RE.search(
+        verify_command
+    ):
+        logger.error(
+            "--verify-command contains '{fn}' but not as "
+            "'--verify-function {fn}' (or '--verify-function={fn}'); refusing to "
+            "run to avoid a literal '{fn}' reaching the shell."
         )
         return 1
 
     files = collect_files(args, repo_root)
     if not files:
-        print("INFO: assert simplification found no Rust files.")
+        logger.info("assert simplification found no Rust files")
         return 0
 
     functions = split_path_args(args.function) if args.function else []
@@ -1589,26 +1849,52 @@ def main() -> int:
     modified_hunks_map = (
         modified_hunks(repo_root, args.base) if args.modified_only else None
     )
-    total = SimplifyStats()
+    perf_factor = None if args.no_perf_guard else args.perf_factor
+
+    # Discover pass: size the progress bar's denominator up front so the strip
+    # pass has a fixed total and a trustworthy ETA. Candidate counts are only
+    # known after parsing each function, and --function/--modified-only filter
+    # them further; sizing needs a pure parse over every file. No verify, no
+    # edit, so this is cheap relative to the per-candidate verify runs.
+    logger.info("discovering proof candidates to size the run...")
+    grand_total = 0
     for path in files:
-        total.add(
-            simplify_file(
-                repo_root=repo_root,
-                path=path,
-                verify_command=verify_command,
-                timeout=args.timeout,
-                dry_run=args.dry_run,
-                deep_clean=args.deep_clean,
-                batch=args.batch,
-                functions=function_names,
-                modified_hunks_map=modified_hunks_map,
-                text_only=args.text_only,
-            )
+        grand_total += count_file_candidates(
+            repo_root=repo_root,
+            path=path,
+            functions=function_names,
+            modified_hunks_map=modified_hunks_map,
+            deep_clean=args.deep_clean,
         )
+    logger.info(
+        f"discovered {grand_total} candidate(s) across {len(files)} file(s); "
+        f"starting strip"
+    )
+
+    total = SimplifyStats()
+    progress = StripProgress(total=grand_total)
+    try:
+        for path in files:
+            total.add(
+                simplify_file(
+                    repo_root=repo_root,
+                    path=path,
+                    verify_command=verify_command,
+                    timeout=args.timeout,
+                    dry_run=args.dry_run,
+                    deep_clean=args.deep_clean,
+                    perf_factor=perf_factor,
+                    functions=function_names,
+                    modified_hunks_map=modified_hunks_map,
+                    progress=progress,
+                )
+            )
+    finally:
+        progress.close()
 
     format_status = run_format_and_cleanup(args, repo_root)
-    print(
-        "INFO: assert simplification "
+    logger.info(
+        "assert simplification "
         f"files={total.files_processed}, functions={total.functions_processed}, "
         f"skipped_unproven={total.functions_skipped_unproven}, "
         f"attempted={total.attempted}, removed={total.removed}, restored={total.restored}, "
@@ -1616,7 +1902,8 @@ def main() -> int:
         f"assert_removed={total.assert_removed}, "
         f"call_attempted={total.call_attempted}, "
         f"call_removed={total.call_removed}, "
-        f"verification_runs={total.verification_runs}."
+        f"verification_runs={total.verification_runs}, "
+        f"kept_as_perf_hint={total.kept_as_perf_hint}."
     )
     return format_status
 

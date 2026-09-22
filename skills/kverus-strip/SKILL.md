@@ -44,7 +44,7 @@ For routine redundant proof-statement cleanup, prefer the bundled script before 
   --format-command '<format command>'
 ```
 
-The script scans changed `.rs` files when no `--target-dir` or `--file` is provided. It simplifies at function scope, matches the `src/refiner/simplifier.py` policy, skips runtime `assert!(...)`, never removes `assert(false)`, skips functions containing `admit`, `assume`, or `#[verifier::external_body]` unless `--deep-clean` is set, removes one proof statement at a time, and keeps the removal only when the verification command still succeeds. With `tree-sitter-verus`, candidates include standalone function-call statements in `proof fn`, `proof {}`, and assertion proof blocks; executable calls are extracted but never offered for deletion. The default mode requires `tree-sitter-verus` and errors out if it is missing; pass `--text-only` to force the lower-precision text-based (asserts-only) parser. Use `--dry-run` to list candidates without editing.
+The script scans changed `.rs` files when no `--target-dir` or `--file` is provided. It simplifies at function scope, matches the `src/refiner/simplifier.py` policy, skips runtime `assert!(...)`, never removes `assert(false)`, skips functions containing `admit`, `assume`, or `#[verifier::external_body]` unless `--deep-clean` is set, removes one proof statement at a time, and keeps the removal only when verification still succeeds. The rlimit perf guard (revert a passing strip when the Z3 rlimit grew by more than `--perf-factor`, measured via verus `--time`) applies only to functions carrying an explicit `#[verifier::rlimit(...)]` budget — those have a real cap a strip could push toward. Every other function strips purely on pass/fail: rlimit growth is not checked and no baseline probe verify is spent. Pass `--no-perf-guard` to apply that pass/fail-only behavior everywhere. With `tree-sitter-verus`, candidates include standalone function-call statements in `proof fn`, `proof {}`, and assertion proof blocks; executable calls are extracted but never offered for deletion. `tree-sitter-verus` is required and the script errors out if it is missing. Use `--dry-run` to list candidates without editing.
 
 To simplify a single function (or a few) instead of a whole file or directory, point `--target-dir` at the file and pass `--function` (repeatable, or comma-separated). Only functions whose short name matches are processed; every other function in the file is left untouched:
 
@@ -67,9 +67,8 @@ To restrict stripping to only the functions you actually changed in this diff, p
 script checks it). Run the script with that venv's Python
 (`$KVERUS_PYTHON`, set up by sourcing `$AGENT_DIR/kverus.env`) and full
 proof-call simplification is active automatically — no manual availability check is
-needed. If the venv is ever unavailable, the default mode errors out — pass
-`--text-only` to force text-based (asserts-only) parsing; always run the script
-rather than substituting manual
+needed. If the venv is ever unavailable, the script errors out; fix the venv rather
+than substituting manual
 stripping, since only the script performs the delete→verify→restore safety loop per
 candidate.
 
@@ -297,11 +296,45 @@ if condition {
 Do not rewrite executable control flow. This pattern applies only in proof/spec/
 ghost contexts covered by the hard constraints.
 
-**Caution:** A textually empty proof branch can still add its condition or negation
-to the SMT context. Treat removal as a normal proof-code candidate: delete it,
-verify, and restore the minimal branch if verification fails or a recommendation
-is unmet. When only one branch is empty, rewrite the proof-only condition only if
-needed to remove that branch, and verify the equivalent form immediately.
+**Caution:** A textually empty proof branch is usually *not* dead code — it is the
+carrier of a case split. When Pattern 1 strips the only statement inside a branch, the
+branch condition typically still serves two roles:
+
+1. **Trivial case:** under the condition, the enclosing goal (often an `ensures`
+   existential) is witnessed by a concrete value, so the branch needs no proof code.
+2. **Sibling path fact:** the condition's negation is exactly the fact the *other*
+   branch needs — e.g. unfolding `!u64_bit_is_set(word, 0)` to
+   `(word & (1u64 << 0)) == 0`, a conjunct of a `by (bit_vector) requires` clause. The
+   explicit `assert` Pattern 1 removed relied on this path fact.
+
+Treat plain removal as a normal proof-code candidate: delete it, verify, and restore the
+minimal branch if verification fails or a recommendation is unmet.
+
+**Preferred treatment — guard flip.** Instead of deleting the case split or restoring a
+redundant witness `assert`, negate the guard of the *meaty* branch so the trivial case
+becomes the unhandled fall-through with no branch at all:
+
+```rust
+// before: middle branch emptied by Pattern 1 — the case split still stands:
+} else if u64_bit_is_set(word, 0) {
+} else {
+    // recursion; uses !u64_bit_is_set(word, 0) as a path fact
+}
+
+// after: trivial case (ensures witnessed by b == 0) falls through:
+} else if !u64_bit_is_set(word, 0) {
+    // Bit 0 clear: recurse on the shift. Otherwise (bit 0 set, 0 < n) the ensures
+    // is witnessed by `b == 0` directly.
+    ...
+}
+```
+
+The vacuous fall-through still closes: the negated branch condition is a ground term that
+matches the goal's `#[trigger]`, so the SMT finds the witness via model-based quantifier
+instantiation. Keep a one-line comment on the flipped guard noting why the unhandled case
+is trivial, verify the flipped form immediately, and only fall back — first to an explicit
+witness `assert` in the removed branch, then to restoring the branch — if verification
+fails.
 
 ### Pattern 6: Unused proof-variable initializations
 
