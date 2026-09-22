@@ -6,8 +6,10 @@ Sources:
 - `source/docs/guide/src/requires_ensures.md`
 - `source/docs/guide/src/reference-at-sign.md`
 - `source/docs/guide/src/reference-attributes.md`
+- `source/docs/guide/src/reference-spec-index.md`
 - `source/docs/guide/src/calling-unverified-from-verified.md`
 - `source/docs/guide/src/exec_attr.md`
+- `source/vstd/seq.rs`
 - `examples/guide/exec_attr.rs`
 
 ## Modes
@@ -133,6 +135,38 @@ assert(tracked_value@ == expected);
 ```
 
 For `Tracked<T>` or `Ghost<T>`, the guide shows pattern matching to unwrap values at function boundaries; see `ghost-tracked.md`.
+
+## Seq Range Slicing
+
+Spec expressions over a `Seq` (or a view, e.g. `bytes@`) support Rust
+range-slicing sugar instead of the `subrange`/`take`/`skip` method calls. The
+desugaring functions are `#[verifier::inline]` and defined in
+`source/vstd/seq.rs`:
+
+| Sugar       | Meaning                              |
+| ----------- | ------------------------------------ |
+| `s[i..j]`   | `s.subrange(i, j)`                   |
+| `s[..j]`    | `s.subrange(0, j)` (via `take`)      |
+| `s[i..]`    | `s.subrange(i, s.len())` (via `skip`) |
+| `s[i..=j]`  | `s.subrange(i, j + 1)`               |
+| `s[..=j]`   | `s.subrange(0, j + 1)` (via `take`)  |
+| `s[..]`     | `s`                                  |
+
+The endpoints accept any type implementing Verus's `Integer` trait (`int`,
+`nat`, `usize`, `u64`, ...), so no `as int` cast is needed, unlike the
+method-call forms whose parameters are `int`:
+
+```rust
+requires
+    valid_utf8(bytes@[size_of::<AnddHeader>()..]),
+ensures
+    ret.header_spec() == decode_pod::<Header>(bytes@[..size_of::<Header>()]),
+```
+
+Prefer the sugar over `.subrange(a, b)`, `.take(n)`, and `.skip(n)` in specs,
+contracts, invariants, and assertions. Converting an existing call to the
+equivalent sugar is proof-neutral: the desugaring is inlined and definitionally
+equal to the call, so the SMT-level expression is unchanged.
 
 ## Minimal Migration Reminders
 
