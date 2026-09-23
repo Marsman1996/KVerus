@@ -4,6 +4,7 @@ Sources:
 - `source/docs/guide/src/ghost_vs_exec.md`
 - `source/docs/guide/src/erasure.md`
 - `source/docs/guide/src/reference-var-modes.md`
+- `source/docs/guide/src/reference-proof-signature.md`
 - `source/docs/guide/src/assert-mut-ref.md`
 - `source/docs/guide/src/mutable-references.md`
 
@@ -85,6 +86,32 @@ Pattern matching:
 ```rust
 let tracked (Tracked(tok), Ghost(model)) = split();
 ```
+
+## Mode Marker Hygiene
+
+Use `ghost` and `tracked` markers where they communicate or enforce a mode
+boundary, not on every value whose mode the context already determines:
+
+- Prefix proof-only fields inside executable structs with `ghost_` or
+  `tracked_` so their erasure and ownership role are visible at the
+  declaration:
+
+  ```rust
+  pub struct Foo {
+      value: u64,
+      tracked_permission: Tracked<Permission>,
+      ghost_model: Ghost<Model>,
+  }
+  ```
+
+- Do not repeat the mode marker on every field of a `ghost struct`. A
+  `tracked struct` is `tracked` by default; mark only the fields that are not
+  linear ownerships as `ghost`.
+- Within proof functions, pass and return tracked resources with `tracked`
+  binders (see Proof Function Signatures); do not wrap each component of an
+  all-tracked proof tuple in `Tracked<_>`. Reserve `Tracked<T>` and
+  `Ghost<T>` for executable or mixed-mode boundaries where erased values must
+  cross an exec signature.
 
 ## Erasure and Imports
 

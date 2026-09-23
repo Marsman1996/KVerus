@@ -1,6 +1,6 @@
 # Lemma Shape
 
-Sources: from practice
+Source scope: from KVerus proof practice
 
 Create a helper lemma when:
 

@@ -4,12 +4,15 @@ Sources:
 - `source/docs/guide/src/modes.md`
 - `source/docs/guide/src/spec_vs_proof.md`
 - `source/docs/guide/src/requires_ensures.md`
+- `source/docs/guide/src/reference-returns.md`
+- `source/docs/guide/src/integers.md`
 - `source/docs/guide/src/reference-at-sign.md`
 - `source/docs/guide/src/reference-attributes.md`
 - `source/docs/guide/src/reference-spec-index.md`
 - `source/docs/guide/src/calling-unverified-from-verified.md`
 - `source/docs/guide/src/exec_attr.md`
 - `source/vstd/seq.rs`
+- `source/vstd/slice.rs`
 - `examples/guide/exec_attr.rs`
 
 ## Modes
@@ -100,6 +103,59 @@ value for postconditions; in `verus!`, use a named return such as
 
 If an existing contract is too weak for modular verification, strengthen it only when the active task permits specification changes. For proof-repair tasks, follow the active task skill's constraints.
 
+## `returns` for Exact Results
+
+`returns $expr` is syntactic sugar for an `ensures ($name: $ty) == $expr`
+clause. Use it when the contract fixes the exact return value; use `ensures`
+for other result or state properties. The same rule applies to
+`assume_specification` models. Omit unused named return binders and unit return
+declarations such as `-> (r: ())`:
+
+```rust
+fn offset(i: u64) -> u64
+    requires
+        i < u64::MAX,
+    returns
+        i + 1
+```
+
+The expression must match the return type. Keep required casts (such as
+`as usize` on a sequence's `nat` length) and justify that the value fits; a
+narrowing `as` on an out-of-range value produces an arbitrary value of the
+target type.
+
+## Integer Coercions and `as int`
+
+Ghost code compares values of different integer types directly — `u < i` may
+mix `u8` with `int`, and chained bounds like `0 <= u < i < n < 4` may span
+types. Ghost arithmetic (`+`, `-`, `*`, `/`, `%`) never overflows: Verus
+widens results to `int` and accepts mixed-type operands. Therefore `as int`
+casts around comparisons and arithmetic operands are redundant:
+
+```rust
+// Prefer:
+len == view(v).len(),
+2 * new_len * size_of::<T>() <= isize::MAX,
+// Over:
+(len as int) == view(v).len(),
+2 * (new_len as int) * (size_of::<T>() as int) <= isize::MAX as int,
+```
+
+Keep `as int` only where Verus performs no auto-coercion; error `E0308` names
+the operand that still needs it:
+
+- A `usize`/`nat` argument at a spec function's `int` parameter: call sites
+  insert no coercion, so `s.subrange(0, new_len as int)` keeps the cast. The
+  [Seq range slicing](#seq-range-slicing) sugar takes `Integer`-typed endpoints
+  directly and avoids the cast.
+- A standalone `/` divisor: once the dividend is `int`, write
+  `(self_ + rhs - 1) / (rhs as int)`, not `/ rhs`.
+- A narrowing cast whose target may not hold the value, where the cast itself
+  is the obligation to prove (see `returns` above).
+
+Use the rule in both directions: do not cast defensively everywhere, and do
+not strip casts blindly — both create verifier churn.
+
 ## Spec Preconditions
 
 `spec fn` uses `recommends`, not `requires`:
@@ -167,6 +223,22 @@ Prefer the sugar over `.subrange(a, b)`, `.take(n)`, and `.skip(n)` in specs,
 contracts, invariants, and assertions. Converting an existing call to the
 equivalent sugar is proof-neutral: the desugaring is inlined and definitionally
 equal to the call, so the SMT-level expression is unchanged.
+
+## Spec and Exec Indexing
+
+In spec code, `expr[i]` desugars to `expr.spec_index(i)` (resolved through
+method resolution for `Seq`, `Map`, and slices), unlike executable indexing,
+which is a place expression or `Index`/`IndexMut` overload. `Seq`'s
+`spec_index` is total: an out-of-bounds access yields an unspecified value
+rather than an error. Spec helpers may rely on the total behavior, but retain
+an explicit bound whenever the claimed property needs a valid index, and give
+quantifiers explicit triggers when instantiation must be reliable.
+
+Executable indexing still requires non-panicking bounds through `requires` —
+vstd's slice index extension models this with `in_bounds`-style preconditions.
+A model of an executable `get` operation must preserve its `Option`
+success/failure semantics; unspecified out-of-bounds spec values do not replace
+that contract.
 
 ## Minimal Migration Reminders
 

@@ -14,11 +14,11 @@ Before editing Verus code, load only the relevant reference:
 - Syntax or mode confusion: read `references/verus-syntax-quickref.md`.
 - Verification repair strategy or error triage: read `references/common-errors.md`.
 - Proof construction, quantifiers, arithmetic, bit-vector, or SMT context issues: read the relevant file under `references/` — `proof-localization.md`, `quantifiers.md`, `solvers.md`, `arithmetic-lemmas.md`, `calc-blocks.md`, `opaque-reveal.md`, `lemma-shape.md`, or `set-reasoning.md`.
-- Loop or recursive proof failures: read `references/invariants.md`.
-- `ghost`, `tracked`, `Tracked<T>`, `Ghost<T>`, `@`, or erasure issues: read `references/ghost-tracked.md`.
-- Axiom-like declarations, external API specifications, trusted boundaries, or proof cleanup: read `references/proof-engineering-and-trust-boundaries.md`.
+- Loop or recursive proof failures, or choosing between a type invariant and explicit `inv()` contracts for a model: read `references/invariants.md`.
+- `ghost`, `tracked`, `Tracked<T>`, `Ghost<T>`, `@`, mode-marker placement, or erasure issues: read `references/ghost-tracked.md`.
+- Axiom-like declarations, external API specifications, trusted boundaries, pairing an exec helper with a spec model (`dual_spec`, spec twins, `when_used_as_spec`), proof helper naming and scoping, or proof cleanup: read `references/proof-engineering-and-trust-boundaries.md`.
 - Missing or incomplete vstd specifications for `std`, `core`, or `alloc` APIs: read `references/std-external-specifications.md` together with `references/proof-engineering-and-trust-boundaries.md`.
-- Any addition, removal, or rewrite of executable Rust: read and follow `references/exec-code-preservation.md` before editing or reviewing the change.
+- Any addition, removal, or rewrite of executable Rust, or placing verification-added `use` imports relative to the original import list: read and follow `references/exec-code-preservation.md` before editing or reviewing the change.
 - Concurrency, invariants, permissions, or state-machine navigation: read `references/tokenized-state-machine.md`.
 - Verus-unsupported features, forced rewrites, or trait associated constant limitations: read `references/unsupported-features/index.md`, then load the relevant topic file from that directory.
 
@@ -51,6 +51,8 @@ Carry these rules into all KVerus skills unless the user explicitly requests a d
 10. For every newly added Verus struct, determine its mode explicitly. Actively try `ghost struct` for constants, models, invariant markers, and other types used only by specifications or proofs. Use `tracked struct` for linear proof resources, and retain an ordinary struct whenever the type has runtime state or participates in executable behavior. Verify the selected mode instead of assuming a zero-sized marker must be executable.
 11. Use `use` declarations as much as possible for proof-only functions, lemmas, broadcast groups, and other proof symbols instead of repeatedly writing long fully qualified paths. Apply this throughout proof code, including contracts, lemma calls, `reveal`, and `broadcast use` expressions. Prefer explicit imports that remain unambiguous; retain a qualified path when it makes a rare reference clearer.
 12. In spec expressions over a `Seq` or a view (e.g. `bytes@`), prefer the range-slicing sugar `s[i..j]`, `s[..j]`, `s[i..]`, `s[i..=j]` over the equivalent `.subrange(...)`, `.take(...)`, `.skip(...)` calls. The sugar accepts `Integer`-typed endpoints such as `usize`, so no `as int` cast is needed, and it desugars (inlined) to the same definition. See `references/verus-syntax-quickref.md` for the full table.
+13. Use `returns expr` for a contract that fixes the exact return value, and `ensures` for other result or state properties; omit unused named return binders and unit return declarations such as `-> (r: ())`. This applies to `assume_specification` models as well. Keep required casts in the `returns` expression (e.g. `as usize` on a `Seq` length) and justify that the value fits. See `references/verus-syntax-quickref.md`.
+14. In ghost code, drop `as int` casts that Verus's auto-coercion makes redundant (mixed-type comparisons and widened `+`, `-`, `*` arithmetic), keeping only the genuinely required ones: at a spec function's `int` parameter (unless the range-slicing sugar applies), at a standalone `/` divisor once the dividend is `int`, and at narrowing casts whose fit must be proven. Let `E0308` identify missing casts rather than casting defensively. See `references/verus-syntax-quickref.md`.
 
 ## Source Basis
 

@@ -1,6 +1,6 @@
 # Arithmetic Lemmas
 
-Sources: from practice
+Source scope: from KVerus proof practice
 
 If `nonlinear_arith` is unstable or too broad, search `vstd::arithmetic` for a focused lemma before inventing a large proof. Common useful facts include multiplication commutativity, associativity, distributivity, and monotonic bounds.
 

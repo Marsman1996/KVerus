@@ -40,3 +40,37 @@ missing, is not immediately adjacent, does not use a block comment, omits either
 reason or `Origin Rust:`, puts the original before the reason, or does not faithfully
 represent the original code. Review semantic equivalence separately; a compliant
 comment does not establish that runtime behavior is preserved.
+
+## Import Layout for Verification-Added Imports
+
+Lay out verification-added imports above the imports inherited from the
+executable source, in blank-line separated groups:
+
+```rust
+use vstd::{
+    laws_cmp::{obeys_cmp_ord, obeys_partial_cmp},
+    laws_eq::obeys_eq_spec_properties,
+};
+use other_crate::{decode_pod, from_bytes_spec};
+
+use crate::models::{CpuId, MemoryRegion};
+
+// Imports inherited from the original source, unchanged:
+use ...;
+```
+
+The first group collects the new spec/proof imports from dependency crates;
+the second holds this file's local spec model imports; the last block is the
+original import list, left unchanged. The blank lines are load-bearing: the
+formatter alphabetizes `use` declarations only within a contiguous run and
+never across a blank line (the unstable import-grouping options are ignored
+on the stable toolchain). Drop the separator and the whole run is
+alphabetized, sinking the local spec imports among the original imports and
+pushing the dependency imports to the bottom.
+
+Within each group, combine definitions from the same crate into one `use`
+statement, including definitions from different modules of that crate. Do not
+merge a newly added spec/proof `use` of a crate into a pre-existing
+executable `use` of that same crate; the blank-line separation between the
+verification-added groups and the original import list takes precedence over
+this merging for such pairs.
