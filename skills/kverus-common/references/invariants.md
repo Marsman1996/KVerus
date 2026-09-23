@@ -1,10 +1,11 @@
-# Loop and Recursive Proof Invariants
+# Loop, Recursive, and Type Invariants
 
 Sources:
 - `source/docs/guide/src/while.md`
 - `source/docs/guide/src/invariants.md`
 - `source/docs/guide/src/recursion.md`
 - `source/docs/guide/src/recursion_loops.md`
+- `source/docs/guide/src/reference-type-invariants.md`
 
 ## Core Rule
 
@@ -124,3 +125,64 @@ proof fn lemma(i: nat, j: nat)
 ```
 
 For induction, split base cases explicitly, then make recursive lemma calls that match the decreases measure.
+
+## Type Invariants for Model Values
+
+When a datatype carries an intrinsic validity invariant, decide between a
+type-level invariant and explicit predicate contracts:
+
+- Prefer `#[verifier::type_invariant]` when every construction of the type is
+  valid and every operation preserves the invariant — thin wrappers with range
+  bounds as well as structural bounds on containers. Verus inserts the proof
+  obligations automatically at constructor expressions, field assignments, and
+  calls taking `&mut X`; every consumer then obtains the fact with the builtin
+  pseudo-lemma `use_type_invariant` instead of threading validity through each
+  contract:
+
+  ```rust
+  struct Range {
+      start: u64,
+      end: u64,
+  }
+
+  impl Range {
+      #[verifier::type_invariant]
+      spec fn type_inv(self) -> bool {
+          self.start <= self.end
+      }
+  }
+  ```
+
+  Constraints: the type must be a struct or enum declared in the same crate
+  with no fields public outside it, and the invariant applies to exec objects
+  and tracked-mode ghost objects, not to spec objects. In exec functions, call
+  `use_type_invariant(&x)` inside a `proof` block on a tracked or exec
+  variable. Keep the invariant function as private as possible.
+
+- Keep the invariant as an explicit `inv()` spec predicate (or an `Inv`-style
+  proof trait) threaded through contracts when either of these holds:
+  - The invariant is transiently broken. Type invariants have no supported
+    "temporarily broken" state; a constructor that fills in a default and
+    repairs it in a later statement is checked mid-sequence. The guide's
+    field-borrow workaround restructures the executable code, which
+    `exec-code-preservation.md` rules out, so state the operation with
+    `old(self).inv()` and `final(self).inv()` contracts instead and keep the
+    intermediate state internal.
+  - Mutating operations may panic. A type invariant charges every exit path
+    of a mutator that takes `&mut X` with restoring the invariant, which
+    couples the invariant to the method's panic behavior. Explicit contracts
+    leave panic behavior to each method's own `requires`/`ensures` and
+    `no_unwind` claims.
+
+- One predicate, one mechanism: once a type carries a `type_invariant`, remove
+  an `impl Inv` or `inv()` contract stating the same fact and migrate callers
+  from `requires inv()` threading to `use_type_invariant`. Keeping both forks
+  one fact into two proof paths whose definitions drift apart.
+
+- Weakening the invariant and restating a single clause as per-method
+  postconditions is a third lever when one clause causes the problems above;
+  it trades implicit strength for explicit per-method guarantees.
+
+- Use a separate `wf(...)` predicate only for well-formedness relations that
+  depend on another value. Making fields private provides representation
+  hiding, but it does not cause Verus to establish `inv()` automatically.

@@ -26,6 +26,10 @@ If `knowledge` is missing, continue without it.
 
 Read `../kverus-common/references/verus-syntax-quickref.md` before annotating executable functions or loops. For other Verus syntax, modes, loop invariants, `decreases`, `recommends`, ghost/tracked values, or spec/proof helper patterns, read the relevant shared reference before editing.
 
+If the narrow exception below requires adding, removing, or rewriting executable
+Rust, first read and follow
+`../kverus-common/references/exec-code-preservation.md`.
+
 ## Objective
 
 Add only the specification structure needed to improve proof readiness of the target file.
@@ -60,6 +64,7 @@ The goal is to improve the specification layer while preserving executable behav
 4. Avoid introducing `assert(... ) by (...)`, `calc!`, new proof lemmas, or proof bodies unless the file would otherwise become syntactically invalid.
 5. No unsound shortcuts: do not add `assume`, `admit`, or `#[verifier::external_body]`.
 6. Preserve source structure as much as possible: item order, function order, impl/block structure, comments, and source locality.
+7. If executable logic must change under constraint 2's narrow exception, document the change using the exact reason-first `Origin Rust:` block-comment format in `exec-code-preservation.md`.
 
 ## Working Style
 

@@ -41,6 +41,11 @@ Phase 8  Report ─────────── final summary
 
 All phases that edit Verus code should consult `../kverus-common/references/` when encountering unfamiliar Verus syntax, modes, ghost/tracked values, loop invariants, quantifiers, or tokenized state-machine rules.
 
+Every phase inherits `../kverus-common/references/exec-code-preservation.md`: before
+any permitted addition, removal, or rewrite of executable Rust, read and follow its
+reason-first `Origin Rust:` block-comment format. No phase-specific summary below may
+weaken this requirement.
+
 ---
 
 ## Phase 0: Pre-flight
@@ -75,7 +80,7 @@ For each file in `FILE_LIST`:
 
 2. Follow all `kverus-migrate` hard constraints:
    - In-place edits only.
-   - Preserve original Rust code as nearby comments.
+   - Preserve every executable change using the reason-first `Origin Rust:` block-comment format from `exec-code-preservation.md`.
    - No fake placeholders (`unimplemented!()`, `panic!()`, `loop {}`).
    - Only change necessary code in the minimal dependency closure.
    - Preserve structure: item order, function order, impl blocks, comments.
@@ -83,7 +88,7 @@ For each file in `FILE_LIST`:
 3. Follow the `kverus-migrate` transformation rules:
    - Attribute-first verification for executable functions; `verus!` for spec/proof declarations and unsupported attribute positions.
    - `#[verifier::external_body]` for functions to skip during proof.
-   - Unsupported features: keep originals as comments, rewrite minimally.
+   - Unsupported features: when executable code changes, use `exec-code-preservation.md`; otherwise preserve the original syntax locally and rewrite minimally.
    - Minimally adapt dependencies.
 
 4. Follow the `kverus-migrate` edit priority:
@@ -129,6 +134,7 @@ For each file in `FILE_LIST` that succeeded in Phase 1:
    - Do NOT add `assert(...) by (...)`, `calc!`, proof lemmas, or proof bodies unless absolutely necessary for syntactic validity.
    - No unsound shortcuts: do NOT add `assume`, `admit`, or `#[verifier::external_body]`.
    - Preserve source structure.
+   - If the narrow executable-change exception is used, follow `exec-code-preservation.md`.
 
 3. The goal is NOT to fully prove the code. The goal is to improve the specification layer while preparing for later proof.
 

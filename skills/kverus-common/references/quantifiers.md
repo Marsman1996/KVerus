@@ -32,3 +32,12 @@ Trigger rules:
 - A trigger should be a function call, field access, indexing expression, or bitwise expression.
 - Avoid triggers based only on arithmetic or boolean comparisons.
 - Prefer a trigger that appears naturally near the desired goal.
+- A trigger with more matches (for example `s[i]` over `is_even(s[i])` for
+  facts about sequence elements) is more likely to find relevant
+  instantiations but also more likely to clog the solver with irrelevant
+  ones; a trigger that can match values unrelated to the data being reasoned
+  about is a bad trigger.
+
+When Verus prints "automatically chose quantifier triggers", it had low
+confidence in its choice; review the chosen triggers and pin an explicit
+`#[trigger]` when the automatic choice is wrong.

@@ -10,4 +10,7 @@ reveal(f);
 assert(f(x) == expected);
 ```
 
-Use `closed spec` for module abstraction; use `opaque`/`reveal` for controlling automation and performance.
+Use `closed spec` for module abstraction: the body stays available to
+module-local proofs while other modules reason through public lemma exports.
+`opaque` hides the body even in the current module, so use `opaque`/`reveal`
+for controlling automation and verification performance, not modularity.

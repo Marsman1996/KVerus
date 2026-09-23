@@ -22,6 +22,9 @@ If either `target` or `verify` is missing, ask for the missing value and stop.
 
 If migration requires Verus syntax, modes, ghost/tracked values, atomic ghost code, loop invariants, or tokenized state-machine rules, read the relevant reference under `../kverus-common/references/` before editing.
 
+Before adding, removing, or rewriting any executable Rust, read and follow
+`../kverus-common/references/exec-code-preservation.md`.
+
 ## Objective
 
 Convert the Rust code in `target` into Verus-compatible code with the smallest possible set of edits such that:
@@ -55,17 +58,15 @@ Do not comment out an entire function, impl, or module and rewrite a replacement
 
 ### B. Preserve original Rust code locally
 
-For each modified or unsupported construct, preserve the original Rust code as a nearby comment at the same location whenever feasible.
+For every executable-code modification, follow the exact reason-first block-comment
+format in `../kverus-common/references/exec-code-preservation.md`. This requirement is
+not optional when the original code can be recovered from the input or Git history.
 
-Preferred style examples:
+For unsupported non-executable syntax, preserve the original locally when feasible.
+For example:
 
 ```rust
 impl<T /*: ?Sized*/, G: SpinGuardian> RwLock<T, G>
-```
-
-```rust
-// let lock = self.lock.fetch_add(READER, Acquire);
-let lock = ...
 ```
 
 ### C. No fake placeholders
@@ -118,7 +119,7 @@ Use this as the default strategy unless it prevents syntactic acceptance.
 
 If Verus does not support a Rust feature or syntax fragment:
 
-1. keep the original code as a nearby comment when feasible
+1. if executable code changes, preserve it using `exec-code-preservation.md`; otherwise keep the original syntax as a nearby comment when feasible
 2. rewrite only the unsupported fragment
 3. keep the rewritten code at the same location
 
@@ -169,7 +170,8 @@ If the verification command cannot succeed without violating the constraints:
 
 Perform the edits in the workspace when allowed.
 
-Return the modified code with local commented preservation of original Rust constructs near modified locations whenever feasible, including any necessary minimal dependency edits.
+Return the modified code with every executable change documented according to
+`exec-code-preservation.md`, including any necessary minimal dependency edits.
 
 Do not add long explanations unless the user asks for them.
 
@@ -192,7 +194,9 @@ impl<T /*: ?Sized*/, G: SpinGuardian> RwLock<T, G> {
     pub fn try_read(&self) -> Option<RwLockReadGuard<T, G>> {
         let guard = G::read_guard();
 
-        // let lock = self.lock.fetch_add(READER, Acquire);
+        /* `fetch_add` needs `atomic_with_ghost!` to expose its transition to Verus.
+         * Origin Rust: let lock = self.lock.fetch_add(READER, Acquire);
+         */
         let lock = atomic_with_ghost!(
             &self.lock => fetch_add(READER);
             returning res;
@@ -206,7 +210,9 @@ impl<T /*: ?Sized*/, G: SpinGuardian> RwLock<T, G> {
                 v_perm: Tracked::assume_new(),
             })
         } else {
-            // self.lock.fetch_sub(READER, Release);
+            /* `fetch_sub` needs `atomic_with_ghost!` to expose its transition to Verus.
+             * Origin Rust: self.lock.fetch_sub(READER, Release);
+             */
             atomic_with_ghost!(
                 &self.lock => fetch_sub(READER);
                 ghost g => { }
