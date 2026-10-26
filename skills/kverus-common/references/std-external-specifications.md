@@ -53,6 +53,12 @@ the behavior; do not paste large portions of Rust's source or documentation.
 Match the executable API exactly: use its qualified path, generics, lifetimes,
 allocator parameters, trait bounds, receiver, arguments, and return type.
 
+- Name an `assume_specification` receiver after its role (`l: &Layout`, 
+  `vec: &Vec<T>`, `b: &bool`, as in the guide's examples). Verus rejects `self`
+  in the signature, but do not fall back to `self_` plus a spelled `(*self_)`
+  deref: when the model spec fn takes `self` by value, method-call auto-deref
+  lets a `&T` receiver call it directly, so write `l.spec_size()` (guide:
+  `reference-assume-specification.md`).
 - Use `requires` only for actual safety, validity, ordering, aliasing, or
   non-panic obligations supported by the API. Do not invent a strong precondition
   solely to make the current caller verify.
